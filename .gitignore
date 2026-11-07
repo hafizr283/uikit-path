@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.DS_Store
+*.xcuserstate
+xcuserdata/
+.build/
+DerivedData/
+.env*
+!.env.example
+test-results/
+.openai/

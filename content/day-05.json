@@ -1,0 +1,237 @@
+{
+  "day": 5,
+  "title": "Forms, controls, scrolling, and the keyboard",
+  "subtitle": "Build input flows that validate clearly and remain usable when the keyboard appears.",
+  "phase": "Foundations",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Choose UIKit controls and connect target–action, UIAction, and delegate callbacks.",
+    "Build a vertical form using UIScrollView's content and frame layout guides.",
+    "Handle first responder, return keys, keyboard avoidance, and dismissal.",
+    "Keep raw text input separate from validated task data."
+  ],
+  "prerequisites": [
+    "Day 4 Auto Layout, stack views, and content sizing.",
+    "A UIKit target on iOS 17 or later for the course examples.",
+    "Use the simulator's software keyboard when testing keyboard avoidance."
+  ],
+  "sections": [
+    {
+      "title": "Controls emit events; delegates answer richer questions",
+      "body": [
+        "UIControl subclasses such as UIButton, UISwitch, UISlider, and UISegmentedControl emit events. A button commonly uses touchUpInside, a text field uses editingChanged, and a switch uses valueChanged. Connect these with target–action selectors or UIAction closures. Choose one clear wiring style per behavior and avoid installing multiple identical actions when a view reappears.",
+        "Delegates support richer interactions. UITextFieldDelegate can decide whether Return should move focus or finish editing, and UITextViewDelegate can observe multiline editing. A text field and a text view are not interchangeable: fields suit short single-line values, while text views support multiline input and scrolling. Keep event handlers small; read the control's value, validate or update state, and render the result."
+      ]
+    },
+    {
+      "title": "Validation is a conversation with the user",
+      "body": [
+        "Raw input is not yet a valid domain value. Trim only where the product rule requires it, check required fields and length, and return useful reasons for rejection. Do not silently erase what the user typed after a failure. An error should say how to fix the value, and the form should preserve the user's other fields.",
+        "Use keyboardType, returnKeyType, autocapitalizationType, and textContentType where they actually describe the field. A task title is ordinary text, not an email address. Disabling Save when input is invalid provides a cue, but it does not replace validation at the save boundary: values may change through restoration, tests, or other code. A disabled button should have nearby explanatory text so the user is not left guessing."
+      ]
+    },
+    {
+      "title": "A scroll view has two geometries",
+      "body": [
+        "UIScrollView's frameLayoutGuide describes its visible viewport. Its contentLayoutGuide describes its scrollable content. For a vertical form, constrain the form's edges to the content guide and its width to the frame guide. The complete top-to-bottom chain through arranged views determines content height; a width relationship prevents unintended horizontal scrolling.",
+        "A scroll view does not automatically know the height of arbitrary subviews. If you leave the bottom relationship missing, it cannot reliably infer the full content extent. If you pin every form edge only to the frame guide, content may be trapped at viewport height. Avoid hardcoding contentSize when Auto Layout already provides a consistent content-layout chain."
+      ]
+    },
+    {
+      "title": "First responder and keyboard avoidance",
+      "body": [
+        "The first responder receives relevant input; calling becomeFirstResponder on a visible text input requests keyboard focus. resignFirstResponder ends editing for that control, while view.endEditing(true) asks the hierarchy to resign its current first responder. Decide what Return means: advance to the next field or finish the form. A Done button or suitable dismissal gesture is helpful when the keyboard has no Return key.",
+        "On modern iOS, UIKeyboardLayoutGuide lets constraints follow keyboard geometry. A vertical form can end its viewport at the guide's top. Test docked keyboards, hardware keyboards, and iPad configurations instead of assuming one fixed keyboard height. A scrolling viewport does not guarantee the active control is visible; for longer forms, scroll the active input into view as the keyboard and layout settle."
+      ]
+    },
+    {
+      "title": "Form state should be readable and testable",
+      "body": [
+        "Keep field values in a small form state or convert them into a validated draft at submission time. Do not scatter business rules across six delegate methods. A pure validation function can be tested with blank text, Unicode, long input, and whitespace without launching UIKit. The controller then translates validation results into labels, button states, and focus changes.",
+        "Accessibility is part of form behavior. Give controls clear labels, do not rely only on red text, and test with Dynamic Type. A UITextView used inside a form often works best with internal scrolling disabled and an appropriate minimum height, allowing the outer form to scroll. For genuinely long documents, design its editing experience intentionally rather than stacking competing scroll gestures."
+      ]
+    }
+  ],
+  "example": {
+    "title": "A keyboard-aware task editor",
+    "filename": "Day05TaskFormViewController.swift",
+    "code": "import UIKit\n\n@MainActor\nfinal class TaskFormViewController: UIViewController, UITextFieldDelegate {\n    private let titleField = UITextField()\n    private let notesView = UITextView()\n    private let helperLabel = UILabel()\n    private let saveButton = UIButton(type: .system)\n\n    override func viewDidLoad() {\n        super.viewDidLoad()\n        title = \"New task\"\n        view.backgroundColor = .systemBackground\n\n        let scroll = UIScrollView()\n        scroll.translatesAutoresizingMaskIntoConstraints = false\n        scroll.keyboardDismissMode = .interactive\n        scroll.contentInsetAdjustmentBehavior = .never\n        view.addSubview(scroll)\n\n        let titleLabel = UILabel()\n        titleLabel.text = \"Task title\"\n        titleLabel.font = .preferredFont(forTextStyle: .headline)\n        titleLabel.adjustsFontForContentSizeCategory = true\n\n        titleField.borderStyle = .roundedRect\n        titleField.placeholder = \"What needs to get done?\"\n        titleField.accessibilityLabel = \"Task title\"\n        titleField.font = .preferredFont(forTextStyle: .body)\n        titleField.adjustsFontForContentSizeCategory = true\n        titleField.returnKeyType = .next\n        titleField.delegate = self\n        titleField.addTarget(self, action: #selector(titleChanged), for: .editingChanged)\n\n        let notesLabel = UILabel()\n        notesLabel.text = \"Notes (optional)\"\n        notesLabel.font = .preferredFont(forTextStyle: .headline)\n        notesLabel.adjustsFontForContentSizeCategory = true\n\n        notesView.font = .preferredFont(forTextStyle: .body)\n        notesView.adjustsFontForContentSizeCategory = true\n        notesView.accessibilityLabel = \"Task notes\"\n        notesView.backgroundColor = .secondarySystemBackground\n        notesView.layer.cornerRadius = 10\n        notesView.isScrollEnabled = false\n\n        helperLabel.font = .preferredFont(forTextStyle: .footnote)\n        helperLabel.adjustsFontForContentSizeCategory = true\n        helperLabel.numberOfLines = 0\n\n        var config = UIButton.Configuration.filled()\n        config.title = \"Save task\"\n        saveButton.configuration = config\n        saveButton.addAction(UIAction { [weak self] _ in self?.save() },\n                             for: .touchUpInside)\n\n        let form = UIStackView(arrangedSubviews: [\n            titleLabel, titleField, notesLabel, notesView, helperLabel, saveButton\n        ])\n        form.axis = .vertical\n        form.spacing = 12\n        form.translatesAutoresizingMaskIntoConstraints = false\n        scroll.addSubview(form)\n\n        let content = scroll.contentLayoutGuide\n        NSLayoutConstraint.activate([\n            scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),\n            scroll.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),\n            scroll.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),\n            scroll.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),\n            form.topAnchor.constraint(equalTo: content.topAnchor, constant: 20),\n            form.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),\n            form.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),\n            form.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -20),\n            form.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -40),\n            titleField.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),\n            notesView.heightAnchor.constraint(greaterThanOrEqualToConstant: 120),\n            saveButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)\n        ])\n        navigationItem.rightBarButtonItem = UIBarButtonItem(\n            title: \"Done\", primaryAction: UIAction { [weak self] _ in\n                self?.view.endEditing(true)\n            }\n        )\n        titleChanged()\n    }\n\n    private var cleanTitle: String {\n        (titleField.text ?? \"\").trimmingCharacters(in: .whitespacesAndNewlines)\n    }\n\n    @objc private func titleChanged() {\n        let count = cleanTitle.count\n        let valid = count > 0 && count <= 80\n        saveButton.isEnabled = valid\n        helperLabel.text = count == 0\n            ? \"Enter a title to enable Save.\"\n            : \"\\(count)/80 characters\"\n        helperLabel.textColor = count > 80 ? .systemRed : .secondaryLabel\n    }\n\n    private func save() {\n        guard !cleanTitle.isEmpty, cleanTitle.count <= 80 else {\n            titleChanged()\n            return\n        }\n        view.endEditing(true)\n        helperLabel.text = \"Draft validated: \\(cleanTitle)\"\n        helperLabel.textColor = .label\n        // Add repository persistence in Day 14; this example only validates a draft.\n    }\n\n    func textFieldShouldReturn(_ textField: UITextField) -> Bool {\n        notesView.becomeFirstResponder()\n        return true\n    }\n}",
+    "walkthrough": [
+      "Add this controller to the UIKit app and present it inside a navigation controller so its Done item is visible.",
+      "The outer scroll view's viewport ends at the keyboard layout guide. Its content remains independently sized by the stack's complete edge constraints.",
+      "The width equality prevents horizontal scrolling, while the stack's arranged content determines its height.",
+      "Title edits update validity and helper text. Save validates again and reports that the draft is valid; it does not claim to persist data.",
+      "Press Next in the title field to move to notes. Use Done or interactive scrolling to dismiss the keyboard, then repeat with large text and a short device."
+    ],
+    "expectedOutput": "A scrollable title-and-notes form. Save is disabled for a blank or overlong title, Next moves to notes, and a valid Save reports a validated draft without pretending it has been stored."
+  },
+  "exercises": [
+    {
+      "id": "d05-warmup",
+      "title": "Move focus on Return",
+      "difficulty": "Warm-up",
+      "prompt": "Given titleField and notesView properties in a UIViewController, implement the text-field delegate so Return advances from the title field to notes.",
+      "requirements": [
+        "Only special-case the intended title field.",
+        "Assign the delegate during setup.",
+        "Do not use a fixed delay before moving focus."
+      ],
+      "starterCode": "func textFieldShouldReturn(_ textField: UITextField) -> Bool {\n    // Move focus\n}",
+      "hints": [
+        "Compare the incoming control by identity with ===.",
+        "becomeFirstResponder returns whether the request succeeded."
+      ],
+      "solution": "// In viewDidLoad:\n// titleField.delegate = self\n// titleField.returnKeyType = .next\n// The controller must conform to UITextFieldDelegate.\n\nfunc textFieldShouldReturn(_ textField: UITextField) -> Bool {\n    guard textField === titleField else { return true }\n    notesView.becomeFirstResponder()\n    return true\n}",
+      "explanation": "The identity check prevents a future second text field from accidentally using the same behavior. Keyboard type alone does not implement navigation between inputs.",
+      "checks": [
+        "Return in title requests focus for notes.",
+        "No arbitrary timer or force unwrap is used.",
+        "The delegate is assigned once during view setup."
+      ]
+    },
+    {
+      "id": "d05-core",
+      "title": "Extract form validation",
+      "difficulty": "Core",
+      "prompt": "Write a pure function that validates a task title and returns its cleaned value or a descriptive error. Use it both for button state and saving.",
+      "requirements": [
+        "Reject blank and over-80-character titles.",
+        "Return a Result instead of throwing for this exercise.",
+        "Keep the function free of UIKit."
+      ],
+      "starterCode": "import Foundation\nenum FormError: Error { case blankTitle, titleTooLong }\nfunc validateTitle(_ raw: String) -> Result<String, FormError> {\n    // Validate\n}",
+      "hints": [
+        "Result has success and failure cases.",
+        "Do not trim internal spaces or alter the user's capitalization."
+      ],
+      "solution": "import Foundation\n\nenum FormError: Error { case blankTitle, titleTooLong }\n\nfunc validateTitle(_ raw: String) -> Result<String, FormError> {\n    let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)\n    guard !clean.isEmpty else { return .failure(.blankTitle) }\n    guard clean.count <= 80 else { return .failure(.titleTooLong) }\n    return .success(clean)\n}",
+      "explanation": "A UI can switch on the result to choose precise feedback. The same validation rule is now usable from a view model, a controller, and a unit test. Return a validated domain value instead of String when the architecture evolves.",
+      "checks": [
+        "Whitespace-only input fails with blankTitle.",
+        "81 characters fail with titleTooLong.",
+        "Input '  Read docs  ' succeeds as 'Read docs'."
+      ]
+    },
+    {
+      "id": "d05-stretch",
+      "title": "Convert a segmented control into a domain value",
+      "difficulty": "Stretch",
+      "prompt": "Represent priority with a three-segment control and convert selection into an enum without a force unwrap. Handle the no-selection case explicitly.",
+      "requirements": [
+        "Keep the enum independent of UIKit.",
+        "Use low, normal, and high cases.",
+        "Choose normal as the deliberate fallback for no selection."
+      ],
+      "starterCode": "enum FormPriority: Int { case low = 0, normal, high }\n// Build UISegmentedControl and a conversion helper.",
+      "hints": [
+        "selectedSegmentIndex may be UISegmentedControl.noSegment.",
+        "A raw-value enum initializer is failable."
+      ],
+      "solution": "import UIKit\n\nenum FormPriority: Int { case low = 0, normal, high }\n\n@MainActor\nfunc makePriorityControl() -> UISegmentedControl {\n    let control = UISegmentedControl(items: [\"Low\", \"Normal\", \"High\"])\n    control.selectedSegmentIndex = FormPriority.normal.rawValue\n    control.accessibilityLabel = \"Task priority\"\n    return control\n}\n\n@MainActor\nfunc selectedPriority(in control: UISegmentedControl) -> FormPriority {\n    FormPriority(rawValue: control.selectedSegmentIndex) ?? .normal\n}",
+      "explanation": "The UI index is an implementation detail; the rest of the app receives a meaningful domain value. If priority is mandatory with no default in your product, return an optional or validation error instead of using this fallback.",
+      "checks": [
+        "Indices 0, 1, and 2 map to low, normal, and high.",
+        "No selection maps to the documented default.",
+        "Changing displayed labels does not alter the enum cases."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "Which event usually observes typed changes in UITextField?",
+      "options": [
+        "touchUpInside.",
+        "editingChanged.",
+        "valueDidDecode.",
+        "viewWillAppear."
+      ],
+      "answer": 1,
+      "explanation": "editingChanged is the UIControl event for changes to the field's editing value."
+    },
+    {
+      "question": "For a vertical Auto Layout form, what usually prevents horizontal scrolling?",
+      "options": [
+        "A fixed contentSize height.",
+        "A content width tied to the scroll view's frameLayoutGuide.",
+        "An unowned delegate.",
+        "Setting keyboardType to default."
+      ],
+      "answer": 1,
+      "explanation": "The width relationship keeps content aligned to the viewport while allowing its height to grow."
+    },
+    {
+      "question": "What is the first responder?",
+      "options": [
+        "Always the app delegate.",
+        "The responder currently first in line to receive relevant input.",
+        "The view with the largest frame.",
+        "The first class in a Swift file."
+      ],
+      "answer": 1,
+      "explanation": "Text inputs become first responder to receive keyboard input."
+    },
+    {
+      "question": "Why validate again in Save when the button is disabled for invalid text?",
+      "options": [
+        "The button performs network validation automatically.",
+        "Values can arrive through other code paths, so the save boundary must enforce invariants.",
+        "Every touchUpInside event is malicious.",
+        "It makes Auto Layout faster."
+      ],
+      "answer": 1,
+      "explanation": "Presentation state is not the domain's final validation boundary."
+    },
+    {
+      "question": "Does the example's Save action persist the task?",
+      "options": [
+        "Yes, UILabel writes to disk.",
+        "Yes, UIAction automatically uses Core Data.",
+        "No; it validates a draft and explicitly leaves persistence for a later lesson.",
+        "Only when the keyboard is hidden."
+      ],
+      "answer": 2,
+      "explanation": "Feedback must describe what actually happened. Validation alone is not durable storage."
+    }
+  ],
+  "pitfalls": [
+    "Pinning scroll content only to the viewport can prevent real scrolling.",
+    "A missing bottom content constraint leaves content height underdetermined.",
+    "Disabling Save without explaining why creates a confusing form.",
+    "Fixed keyboard heights fail with hardware keyboards and other configurations.",
+    "Nested scrolling text views can compete with the form's scroll gestures."
+  ],
+  "checkpoint": [
+    "Explain contentLayoutGuide versus frameLayoutGuide.",
+    "Build and validate a form without force unwrapping text.",
+    "Demonstrate Next and Done behavior with the software keyboard.",
+    "Test blank, overlong, Unicode, and whitespace-padded titles.",
+    "Explain exactly what the Save action does and does not store."
+  ],
+  "references": [
+    {
+      "title": "Apple — UIScrollView",
+      "url": "https://developer.apple.com/documentation/uikit/uiscrollview"
+    },
+    {
+      "title": "Apple — UIKeyboardLayoutGuide",
+      "url": "https://developer.apple.com/documentation/uikit/uikeyboardlayoutguide"
+    },
+    {
+      "title": "Apple — UITextFieldDelegate",
+      "url": "https://developer.apple.com/documentation/uikit/uitextfielddelegate"
+    },
+    {
+      "title": "Apple — UIControl",
+      "url": "https://developer.apple.com/documentation/uikit/uicontrol"
+    }
+  ],
+  "capstone": {
+    "title": "Build the PocketTasks editor form",
+    "steps": [
+      "Add title, notes, and priority controls to the editor.",
+      "Use one title-validation rule for feedback and submission.",
+      "Make the form scroll and remain usable with the keyboard visible.",
+      "Return a validated draft to the caller later; do not show a persistence success before a repository has actually saved it."
+    ]
+  }
+}

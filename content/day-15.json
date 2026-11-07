@@ -1,0 +1,236 @@
+{
+  "day": 15,
+  "title": "Authentication & session management",
+  "subtitle": "Keep credentials private and session state predictable.",
+  "phase": "Ship with confidence",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Explain access tokens, refresh tokens, and server-side authorization.",
+    "Store a refresh token in Keychain without treating UserDefaults as secret storage.",
+    "Coordinate expired-session handling and simultaneous refresh requests.",
+    "Design login, restoration, logout, and account-switch transitions."
+  ],
+  "prerequisites": [
+    "Day 10: actors, tasks, cancellation, and MainActor.",
+    "Day 11: URLSession, HTTP status handling, and Codable.",
+    "Day 13: injected services and a single source of truth."
+  ],
+  "sections": [
+    {
+      "title": "1. Authentication is a state machine",
+      "body": [
+        "Authentication answers who the server believes you are; authorization answers which actions that identity may perform. A hidden button is a UI choice, not an authorization boundary. The backend must check permissions on every protected operation. Your iOS app represents that server relationship with explicit states such as restoring, signedOut, signingIn, signedIn, and expired. Model those states rather than scattering an isLoggedIn Boolean across controllers.",
+        "At launch, display a restoration state while you examine stored credentials and ask the server for an acceptable session. A stored token does not prove that the account still exists or that the token remains valid. Network failure during restoration is also different from a server rejecting the credential. Keep a retry path and decide deliberately which cached account data can be shown offline. On logout, clear account-specific caches, cancel requests, remove stored credentials, and replace the protected navigation hierarchy."
+      ]
+    },
+    {
+      "title": "2. Understand token boundaries",
+      "body": [
+        "An access token is usually short lived and accompanies protected API requests. A refresh token can obtain a replacement access token and is consequently a valuable credential. Exact expiration and rotation rules belong to the service contract. Do not assume all tokens are JWTs, decode a token and call the contents trusted, or invent your own password protocol. A token is still untrusted until the server validates it.",
+        "Use HTTPS and attach an Authorization header only to the intended API origin. Never put secrets in URLs, screenshots, analytics, print statements, or source control. A mobile app cannot keep an embedded client secret confidential. For an OAuth or OpenID Connect service, use its supported authorization-code flow with PKCE and a system web-authentication session, including state/nonce validation appropriate to that flow. A practice email form and an in-memory mock server are useful exercises, but they do not implement a production identity provider."
+      ]
+    },
+    {
+      "title": "3. Persist the minimum in Keychain",
+      "body": [
+        "UserDefaults and ordinary JSON files are suitable for preferences and non-secret data; they are not appropriate places for refresh tokens. Keychain provides platform-managed storage and an accessibility policy. The example chooses WhenUnlockedThisDeviceOnly: the item is available while the device is unlocked and does not migrate to another device. Select a different policy only when the product's documented background-access requirements justify it.",
+        "A Keychain item has an identity, here a service and account pair. Updating data is different from creating an item, and a missing item is a normal signed-out condition. Other errors, such as unavailable interaction, must remain visible to the caller. An actor serializes this helper's operations, but it does not automatically solve session lifecycle races elsewhere. Never log the stored value while debugging the helper; log a safe operation name and an error code instead."
+      ]
+    },
+    {
+      "title": "4. Refresh once, retry deliberately",
+      "body": [
+        "Many requests may discover expiration at the same moment. Starting a refresh for each can cause duplicate work or invalidate rotated refresh tokens. Give one session service ownership of an in-flight refresh task so callers can await the same result. Remember that actors are reentrant across await: another method can run while a refresh is suspended. Use a generation or session identifier to prevent a response from an old account from being installed after logout or account switching.",
+        "A refresh failure should not create an infinite 401 loop. Refresh at most once for an eligible request, then surface rejection if the retry is unauthorized. Decide whether the original operation is safe to repeat: a timed-out payment POST may already have succeeded. An idempotency key and server support can make selected mutations retryable. Distinguish cancellation, connectivity failure, forbidden access, and expired authentication; mapping every failure to logout produces a frustrating and misleading app."
+      ]
+    },
+    {
+      "title": "5. Keep authentication out of view controllers",
+      "body": [
+        "A login controller should gather input, show validation and progress, and render a result. Inject an authentication service rather than letting each screen read Keychain or build refresh requests. Keep credentials out of view-model debug descriptions. Disable duplicate submissions while an operation is active, use secure text entry for passwords, and show errors without revealing whether an unrelated person's account exists.",
+        "At the root, observe session state on MainActor and choose the signed-out or protected flow. When a token expires, preserve a non-secret description of the user's intended destination if the product allows it. After a successful login, validate that destination again before opening it. Test restoration with no token, a valid token, a rejected token, airplane mode, concurrent requests, and logout during refresh. These boundaries are more valuable than a login screen that only works on the happy path."
+      ]
+    }
+  ],
+  "example": {
+    "title": "A small Keychain refresh-token store",
+    "filename": "RefreshTokenStore.swift",
+    "code": "import Foundation\nimport Security\n\nenum TokenStoreError: Error {\n    case status(OSStatus)\n    case invalidData\n}\n\nactor RefreshTokenStore {\n    private let service: String\n    private let account = \"refresh-token\"\n\n    init(service: String) {\n        self.service = service\n    }\n\n    private var identity: [String: Any] {\n        [\n            kSecClass as String: kSecClassGenericPassword,\n            kSecAttrService as String: service,\n            kSecAttrAccount as String: account\n        ]\n    }\n\n    func save(_ token: String) throws {\n        let data = Data(token.utf8)\n        let update = [kSecValueData as String: data]\n        let status = SecItemUpdate(\n            identity as CFDictionary,\n            update as CFDictionary\n        )\n        if status == errSecSuccess { return }\n        guard status == errSecItemNotFound else {\n            throw TokenStoreError.status(status)\n        }\n\n        var item = identity\n        item[kSecValueData as String] = data\n        item[kSecAttrAccessible as String] =\n            kSecAttrAccessibleWhenUnlockedThisDeviceOnly\n        let added = SecItemAdd(item as CFDictionary, nil)\n        guard added == errSecSuccess else {\n            throw TokenStoreError.status(added)\n        }\n    }\n\n    func read() throws -> String? {\n        var query = identity\n        query[kSecReturnData as String] = true\n        query[kSecMatchLimit as String] = kSecMatchLimitOne\n        var result: CFTypeRef?\n        let status = SecItemCopyMatching(\n            query as CFDictionary, &result\n        )\n        if status == errSecItemNotFound { return nil }\n        guard status == errSecSuccess else {\n            throw TokenStoreError.status(status)\n        }\n        guard let data = result as? Data,\n              let token = String(data: data, encoding: .utf8)\n        else { throw TokenStoreError.invalidData }\n        return token\n    }\n\n    func delete() throws {\n        let status = SecItemDelete(identity as CFDictionary)\n        guard status == errSecSuccess ||\n              status == errSecItemNotFound else {\n            throw TokenStoreError.status(status)\n        }\n    }\n}",
+    "walkthrough": [
+      "Add this file to an iOS app target. It uses Foundation and Security and does not depend on a storyboard or SwiftUI.",
+      "Create one store with a stable reverse-DNS service such as com.example.PocketTasks.auth. Use a unique service in each test so exercises cannot overwrite a real account's item.",
+      "Call try await store.save(\"fixture-only\"), then try await store.read(), and finally try await store.delete() from an async function. Compare values in a test; do not print real tokens.",
+      "The update-first path handles replacing an existing token. A missing item falls back to add, with an explicit device-local accessibility policy.",
+      "This stores one refresh token. Multiple accounts, access groups, refresh-token rotation, biometric access control, and the server exchange need additional product-specific design."
+    ],
+    "expectedOutput": "A saved fixture can be read; saving again replaces it; reading after deletion returns nil. All non-missing Keychain failures are thrown."
+  },
+  "exercises": [
+    {
+      "id": "15-warmup",
+      "title": "Make expiry logic deterministic",
+      "difficulty": "Warm-up",
+      "prompt": "A request should proactively refresh when its access token is within 30 seconds of expiration. Write a pure value type so you can test exact boundary times without waiting for the clock.",
+      "requirements": [
+        "Inject the current Date into the decision.",
+        "Treat the exact boundary as needing refresh.",
+        "Keep the raw token out of descriptions and output."
+      ],
+      "starterCode": "import Foundation\nstruct AccessCredential {\n    let value: String\n    let expiresAt: Date\n    func needsRefresh(at now: Date) -> Bool {\n        // Compare against a 30-second allowance.\n        false\n    }\n}",
+      "hints": [
+        "Date supports timeIntervalSince(_:).",
+        "A remaining lifetime of exactly 30 seconds belongs to the refresh case."
+      ],
+      "solution": "import Foundation\nstruct AccessCredential {\n    let value: String\n    let expiresAt: Date\n\n    func needsRefresh(at now: Date) -> Bool {\n        expiresAt.timeIntervalSince(now) <= 30\n    }\n}",
+      "explanation": "Time is a dependency even when it looks like a global utility. Passing now makes expiration behavior reproducible. This allowance reduces near-expiry failures but cannot replace server-side validation.",
+      "checks": [
+        "A token expiring in 31 seconds returns false.",
+        "A token expiring in 30 seconds returns true.",
+        "An already expired token returns true."
+      ]
+    },
+    {
+      "id": "15-core",
+      "title": "Build a safe authorized request",
+      "difficulty": "Core",
+      "prompt": "Create a GET request for one known HTTPS API origin. Reject a URL from another host or port so a caller cannot accidentally attach a token to an unrelated image URL.",
+      "requirements": [
+        "Accept only https://api.example.com with no non-default port.",
+        "Reject embedded username/password credentials.",
+        "Use an Authorization header and never a query token.",
+        "Keep the function pure so tests can inspect the URLRequest."
+      ],
+      "starterCode": "import Foundation\nenum RequestError: Error { case untrustedURL }\nfunc authorizedGET(url: URL, token: String) throws -> URLRequest {\n    // Validate the destination before attaching the token.\n    URLRequest(url: url)\n}",
+      "hints": [
+        "URL exposes scheme, host, port, user, and password.",
+        "HTTPS's default port is 443; a nil port also means the default."
+      ],
+      "solution": "import Foundation\nenum RequestError: Error { case untrustedURL }\n\nfunc authorizedGET(url: URL, token: String) throws -> URLRequest {\n    guard url.scheme?.lowercased() == \"https\",\n          url.host?.lowercased() == \"api.example.com\",\n          url.port == nil || url.port == 443,\n          url.user == nil, url.password == nil\n    else { throw RequestError.untrustedURL }\n\n    var request = URLRequest(url: url)\n    request.httpMethod = \"GET\"\n    request.setValue(\"Bearer \\(token)\",\n                     forHTTPHeaderField: \"Authorization\")\n    return request\n}",
+      "explanation": "Credential attachment should have an explicit destination boundary. This exercise constructs a request only; a production client must also define redirect handling and avoid forwarding credentials outside the trusted origin. Use a fixture token during inspection.",
+      "checks": [
+        "An HTTPS URL at the exact API host is accepted.",
+        "HTTP, api.example.com.evil.test, and port 8443 are rejected.",
+        "The token is present in the header and absent from the URL."
+      ]
+    },
+    {
+      "id": "15-stretch",
+      "title": "Share one refresh task and invalidate it on logout",
+      "difficulty": "Stretch",
+      "prompt": "Implement an actor that shares a single refresh operation. For this exercise the injected refresh closure returns a fixture access token; it does not contact an identity provider or persist a rotated refresh token.",
+      "requirements": [
+        "Two simultaneous callers share the in-flight task.",
+        "logout() cancels the task and advances a generation.",
+        "A pre-logout result must never be returned as a current credential.",
+        "Let callers handle refresh errors; do not swallow them."
+      ],
+      "starterCode": "import Foundation\nactor RefreshCoordinator {\n    // Store a task and a session generation here.\n}",
+      "hints": [
+        "Store Task<String, Error>? in the actor.",
+        "Record the generation before await and check it afterward.",
+        "Use a monotonically changing attempt ID so an old waiter cannot clear a newer in-flight task."
+      ],
+      "solution": "import Foundation\n\nactor RefreshCoordinator {\n    private var inFlight: Task<String, Error>?\n    private var generation = 0\n    private var attempt = 0\n    private let refresh: @Sendable () async throws -> String\n\n    init(refresh: @escaping @Sendable () async throws -> String) {\n        self.refresh = refresh\n    }\n\n    func token() async throws -> String {\n        let startedGeneration = generation\n        if inFlight == nil {\n            attempt += 1\n            let operation = refresh\n            inFlight = Task { try await operation() }\n        }\n        let startedAttempt = attempt\n        guard let task = inFlight else {\n            throw CancellationError()\n        }\n\n        do {\n            let result = try await task.value\n            guard generation == startedGeneration else {\n                throw CancellationError()\n            }\n            if attempt == startedAttempt { inFlight = nil }\n            return result\n        } catch {\n            if generation == startedGeneration &&\n                attempt == startedAttempt {\n                inFlight = nil\n            }\n            throw error\n        }\n    }\n\n    func logout() {\n        generation += 1\n        inFlight?.cancel()\n        inFlight = nil\n    }\n}",
+      "explanation": "Actor serialization does not extend across an await. The generation prevents the old session from surviving logout, while the attempt guard prevents an older waiter from clearing a later task. The shared task is cancelled by logout, not automatically by one waiting caller. Production token rotation must also guard its persistence step against an old generation.",
+      "checks": [
+        "Inject a counted delayed closure; concurrent token() calls invoke it once.",
+        "Call logout before the delayed closure completes; awaiting callers fail.",
+        "After logout, a new call can start a new task without an old waiter clearing it."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "Which location is appropriate for a long-lived refresh token?",
+      "options": [
+        "UserDefaults",
+        "A bundled JSON file",
+        "Keychain with a deliberate accessibility policy",
+        "An analytics user property"
+      ],
+      "answer": 2,
+      "explanation": "Keychain is designed for credentials. Its accessibility and sharing settings must match the product requirements."
+    },
+    {
+      "question": "Why can a logout race still occur inside an actor?",
+      "options": [
+        "Actors never serialize methods",
+        "An actor can run another method while a method awaits",
+        "Keychain always logs out automatically",
+        "Only UIKit classes support cancellation"
+      ],
+      "answer": 1,
+      "explanation": "Actors are reentrant at suspension points. Validate the session generation after asynchronous work."
+    },
+    {
+      "question": "An API returns 403 for a signed-in account. What should you assume?",
+      "options": [
+        "Refresh forever",
+        "The request is necessarily offline",
+        "The account may lack permission for this operation",
+        "The token must be stored in a URL"
+      ],
+      "answer": 2,
+      "explanation": "A forbidden response often represents authorization failure. Follow the service contract rather than treating every rejection as token expiry."
+    },
+    {
+      "question": "Why is blindly retrying a timed-out purchase POST dangerous?",
+      "options": [
+        "POST bodies cannot be encoded",
+        "The server may already have processed it",
+        "HTTPS cannot carry POST",
+        "A timeout proves the server did nothing"
+      ],
+      "answer": 1,
+      "explanation": "The response can be lost after the mutation succeeds. Use appropriate server idempotency semantics before retrying."
+    },
+    {
+      "question": "What does a token found at launch prove?",
+      "options": [
+        "The account is still authorized",
+        "The token never expires",
+        "The app has stored credential material that still needs validation",
+        "The user entered a password today"
+      ],
+      "answer": 2,
+      "explanation": "Local presence says nothing about server-side revocation or account status."
+    }
+  ],
+  "pitfalls": [
+    "A Boolean login flag can disagree with the actual server session.",
+    "Deleting the credential without clearing account caches can expose the previous user's data.",
+    "Logging requests without redaction can leak Authorization headers.",
+    "A refresh task can complete after logout or account switching.",
+    "An embedded client secret in an iOS binary is not a confidential server secret."
+  ],
+  "checkpoint": [
+    "Explain how a protected screen is chosen during restoration.",
+    "Demonstrate fixture save, replace, read, and deletion in Keychain.",
+    "Describe the difference between a 401, a 403, and a connectivity failure.",
+    "Explain how your design rejects a stale refresh result after logout.",
+    "Identify which requests may be safely retried and why."
+  ],
+  "references": [
+    {
+      "title": "Apple: Keychain Services",
+      "url": "https://developer.apple.com/documentation/security/keychain-services"
+    },
+    {
+      "title": "Apple: ASWebAuthenticationSession",
+      "url": "https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession"
+    },
+    {
+      "title": "Swift: Concurrency",
+      "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/"
+    }
+  ],
+  "capstone": {
+    "title": "Give PocketTasks an explicit session boundary",
+    "steps": [
+      "Use a mock AuthService to build signed-out, restoring, and signed-in flows without collecting real credentials.",
+      "Store only a fixture refresh token in the example Keychain service.",
+      "Clear fixture tasks and protected navigation on logout.",
+      "Document where production OAuth configuration, redirect policy, token rotation, and server authorization would be added."
+    ]
+  }
+}

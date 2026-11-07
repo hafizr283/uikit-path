@@ -1,0 +1,19 @@
+{
+  "folders": [{ "name": "UIKit Path", "path": "." }],
+  "settings": {
+    "files.exclude": { "dist": true },
+    "editor.tabSize": 4,
+    "editor.wordWrap": "on",
+    "[swift]": { "editor.wordWrap": "off" }
+  },
+  "extensions": { "recommendations": ["swiftlang.swift-vscode"] },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {"label":"Preview course","type":"shell","command":"node scripts/dev.mjs","isBackground":true,"problemMatcher":[]},
+      {"label":"Validate course","type":"shell","command":"npm test","problemMatcher":[]},
+      {"label":"Build course and Markdown","type":"shell","command":"npm run build","problemMatcher":[]},
+      {"label":"Open PocketTasks in Xcode (Mac)","type":"shell","command":"open native/PocketTasks/PocketTasks.xcodeproj","problemMatcher":[]}
+    ]
+  }
+}

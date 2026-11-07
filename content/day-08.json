@@ -1,0 +1,231 @@
+{
+  "day": 8,
+  "title": "Table views that stay correct",
+  "subtitle": "Build a task list with stable identity, reusable cells, and predictable updates.",
+  "phase": "Build",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Explain the separate responsibilities of a table view, its data source, and its delegate.",
+    "Build self-sizing cells whose content is fully reset on every configuration.",
+    "Apply diffable snapshots using stable model identifiers.",
+    "Implement selection, refresh, deletion, and empty states without desynchronizing the model."
+  ],
+  "prerequisites": [
+    "Days 3–7: UIKit lifecycle, Auto Layout, navigation, and reusable views.",
+    "Swift structs, UUID, dictionaries, and closures."
+  ],
+  "sections": [
+    {
+      "title": "1. A table is a viewport over your model",
+      "body": [
+        "UITableView is useful when people need to scan a vertical sequence: inbox messages, settings, search results, or PocketTasks items. The table creates only the cells needed for the visible region, with a small reuse buffer. Your model therefore cannot live in cells. Scrolling a row offscreen may recycle its cell for an entirely different task.",
+        "A data source answers which sections and rows exist and how each row should look. A delegate handles interactions and presentation decisions such as selection, swipe actions, and row sizing. With a diffable data source, you still use a delegate. Do not also implement the classic numberOfRowsInSection and cellForRowAt methods as a second competing source of truth."
+      ]
+    },
+    {
+      "title": "2. Identity is different from position and content",
+      "body": [
+        "An index path is the current location of a row, not the identity of a task. Inserting a new task at the top moves every later index path. Give each model a stable UUID and put those identifiers in the snapshot. Keep the actual models in a dictionary or repository keyed by UUID. Resolve the selected identifier through the data source when a user taps a row.",
+        "The snapshot describes ordered section and item identifiers at one moment. Applying it lets UIKit calculate insertions, moves, and removals. Changing a title in your dictionary does not automatically update an existing cell because the identifier has not changed. Use snapshot.reconfigureItems for content changes to existing identifiers. Create a new snapshot for membership or ordering changes."
+      ]
+    },
+    {
+      "title": "3. Reuse requires complete configuration",
+      "body": [
+        "Every cell configuration must set every visible state that varies: title, subtitle, image, accessory, color, and loading placeholder. A common bug sets a checkmark only when a task is complete; an incomplete task then inherits the checkmark from the previous occupant of the cell. Assign both branches explicitly. UIListContentConfiguration is a convenient starting point for standard cells.",
+        "Custom cells should create their subviews once in init and constrain them to contentView. Make a complete vertical constraint chain from the content view's top to bottom. Set a multiline label's numberOfLines to zero, use automaticDimension, and supply a reasonable estimatedRowHeight. prepareForReuse is useful for cancelling work and resetting transient state; it does not replace correct model configuration."
+      ]
+    },
+    {
+      "title": "4. Mutation should flow through the model",
+      "body": [
+        "For a swipe-to-delete action, resolve the item's current identifier, remove that identifier from your model, and then apply a snapshot representing the new model. Do not merely remove a row visually while leaving the record in storage: it will reappear on the next refresh. If deletion is remote, decide whether to wait for success or perform an optimistic deletion with a visible recovery path.",
+        "Selection should also resolve an identifier before navigating to details. Refresh controls should finish in both success and failure paths. An empty list deserves an explanatory background view and a useful action, while a failed request deserves a retry state. Those are distinct meanings even though both may currently display zero rows."
+      ]
+    },
+    {
+      "title": "5. Keep scrolling work small and observable",
+      "body": [
+        "Cell configuration runs frequently on the main actor. It should apply already-prepared presentation values, not perform networking, synchronously decode large images, or calculate expensive attributed strings. Prefetching can start upcoming work, but it is a performance hint rather than a guarantee. A row must still behave correctly when it appears without a prefetch callback.",
+        "When diagnosing a list bug, first inspect model identity and snapshot contents. Duplicate identifiers are invalid. For disappearing accessories, inspect complete configuration. For height problems, inspect constraints inside contentView. For stutter, profile on a device using Time Profiler rather than assuming the number of Swift lines determines performance."
+      ]
+    }
+  ],
+  "example": {
+    "title": "A complete diffable task list",
+    "filename": "TasksViewController.swift",
+    "code": "import UIKit\n\nstruct TaskItem: Identifiable {\n    let id: UUID\n    var title: String\n    var isDone: Bool\n}\n\n@MainActor\nfinal class TasksViewController: UITableViewController {\n    private enum Section: Hashable { case main }\n    private var order: [UUID] = []\n    private var tasks: [UUID: TaskItem] = [:]\n    private var source: UITableViewDiffableDataSource<Section, UUID>!\n\n    override func viewDidLoad() {\n        super.viewDidLoad()\n        title = \"PocketTasks\"\n        tableView.register(UITableViewCell.self, forCellReuseIdentifier: \"task\")\n        tableView.rowHeight = UITableView.automaticDimension\n        tableView.estimatedRowHeight = 64\n\n        source = UITableViewDiffableDataSource(\n            tableView: tableView\n        ) { [weak self] table, indexPath, id in\n            guard let task = self?.tasks[id] else { return nil }\n            let cell = table.dequeueReusableCell(\n                withIdentifier: \"task\", for: indexPath\n            )\n            var content = cell.defaultContentConfiguration()\n            content.text = task.title\n            content.textProperties.numberOfLines = 0\n            content.secondaryText = task.isDone ? \"Completed\" : \"To do\"\n            cell.contentConfiguration = content\n            cell.accessoryType = task.isDone ? .checkmark : .none\n            return cell\n        }\n\n        let examples = [\n            TaskItem(id: UUID(), title: \"Build a reusable task row\", isDone: false),\n            TaskItem(id: UUID(), title: \"Read the table view documentation\", isDone: true),\n            TaskItem(id: UUID(), title: \"Test this long task title with a larger text size\", isDone: false)\n        ]\n        order = examples.map(\\.id)\n        tasks = Dictionary(uniqueKeysWithValues: examples.map { ($0.id, $0) })\n        applySnapshot()\n    }\n\n    private func applySnapshot() {\n        var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()\n        snapshot.appendSections([.main])\n        snapshot.appendItems(order)\n        source.apply(snapshot, animatingDifferences: false)\n    }\n\n    override func tableView(\n        _ tableView: UITableView,\n        didSelectRowAt indexPath: IndexPath\n    ) {\n        tableView.deselectRow(at: indexPath, animated: true)\n        guard let id = source.itemIdentifier(for: indexPath),\n              var task = tasks[id] else { return }\n        task.isDone.toggle()\n        tasks[id] = task\n        var snapshot = source.snapshot()\n        snapshot.reconfigureItems([id])\n        source.apply(snapshot, animatingDifferences: true)\n    }\n}",
+    "walkthrough": [
+      "In an iOS UIKit app, add this file and make UINavigationController(rootViewController: TasksViewController(style: .insetGrouped)) the window's root controller in your existing scene setup. This is an app view controller, not a command-line Swift script.",
+      "The order array controls presentation order while the dictionary stores current model values. Each UUID is generated once when its model is created.",
+      "The cell provider captures the controller weakly because the controller owns the data source, which retains the provider closure.",
+      "Both accessory branches and both subtitle branches are assigned on every configuration, preventing recycled visual state.",
+      "Tapping resolves the UUID through the data source, updates the model, and reconfigures that same stable identifier."
+    ],
+    "expectedOutput": "Three task rows appear. Long titles wrap and grow the row. Tapping any row toggles its subtitle and checkmark without creating a new task."
+  },
+  "exercises": [
+    {
+      "id": "d08-warmup",
+      "title": "Repair a reused checkmark",
+      "difficulty": "Warm-up",
+      "prompt": "A teammate's cell configuration only adds a checkmark for completed tasks. Rewrite it so unfinished tasks can never inherit old content, and explain why scrolling reveals the bug.",
+      "requirements": [
+        "Set the title for both complete and incomplete tasks.",
+        "Always set the accessory type.",
+        "Use the TaskItem model from the example."
+      ],
+      "starterCode": "func configure(_ cell: UITableViewCell, task: TaskItem) {\n    if task.isDone { cell.accessoryType = .checkmark }\n}",
+      "hints": [
+        "The same cell object can represent several different models.",
+        "Each varying property needs a value for every model state."
+      ],
+      "solution": "@MainActor\nfunc configure(_ cell: UITableViewCell, task: TaskItem) {\n    var content = cell.defaultContentConfiguration()\n    content.text = task.title\n    content.secondaryText = task.isDone ? \"Completed\" : \"To do\"\n    cell.contentConfiguration = content\n    cell.accessoryType = task.isDone ? .checkmark : .none\n}",
+      "explanation": "Reuse preserves object properties. A one-sided conditional leaves the previous task's accessory untouched when the new task is incomplete. Full configuration makes the cell a rendering of the current model rather than a memory of past models.",
+      "checks": [
+        "Configure one cell with a completed task, then an incomplete task; the checkmark disappears.",
+        "Repeat in the opposite order and verify both titles and subtitles."
+      ]
+    },
+    {
+      "id": "d08-core",
+      "title": "Add tasks without changing existing identities",
+      "difficulty": "Core",
+      "prompt": "Extend TasksViewController with an addTask(title:) method. Insert the new task at the top and update the list without rebuilding UUIDs for existing tasks.",
+      "requirements": [
+        "Trim leading and trailing whitespace and reject blank input.",
+        "Create exactly one new identifier.",
+        "Keep existing tasks and their completion state."
+      ],
+      "starterCode": "// Add inside TasksViewController.\nprivate func addTask(title: String) {\n    // Validate, insert, and render.\n}",
+      "hints": [
+        "Use trimmingCharacters(in: .whitespacesAndNewlines).",
+        "Both order and tasks need updates before applying a snapshot."
+      ],
+      "solution": "private func addTask(title: String) {\n    let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)\n    guard !cleaned.isEmpty else { return }\n    let task = TaskItem(id: UUID(), title: cleaned, isDone: false)\n    tasks[task.id] = task\n    order.insert(task.id, at: 0)\n    applySnapshot()\n}",
+      "explanation": "Stable identifiers allow the diffable data source to recognize existing rows. Recreating every model with a fresh UUID would describe a replacement of the entire list and could lose selection or associated state. Call the method from a button or a temporary line after the initial snapshot.",
+      "checks": [
+        "Add two tasks and confirm that they appear newest first.",
+        "Complete an existing task, add another, and verify that completion remains.",
+        "Pass only spaces and verify that the row count does not change."
+      ]
+    },
+    {
+      "id": "d08-stretch",
+      "title": "Delete by identifier and render an empty state",
+      "difficulty": "Stretch",
+      "prompt": "Add a model-driven delete method and an empty-list message. Call the method from a temporary button or debug action before connecting a trailing swipe action.",
+      "requirements": [
+        "Remove the identifier from both model containers.",
+        "Use a background view for the empty state.",
+        "Do not call deleteRows alongside a diffable snapshot."
+      ],
+      "starterCode": "// Add inside TasksViewController.\nprivate func deleteTask(id: UUID) { }\nprivate func updateEmptyState() { }",
+      "hints": [
+        "A background view belongs to the table rather than to a reusable cell.",
+        "Call updateEmptyState after every membership change."
+      ],
+      "solution": "private func deleteTask(id: UUID) {\n    tasks.removeValue(forKey: id)\n    order.removeAll { $0 == id }\n    applySnapshot()\n    updateEmptyState()\n}\n\nprivate func updateEmptyState() {\n    guard order.isEmpty else {\n        tableView.backgroundView = nil\n        return\n    }\n    let label = UILabel()\n    label.text = \"No tasks yet. Add your first task.\"\n    label.textAlignment = .center\n    label.numberOfLines = 0\n    label.font = .preferredFont(forTextStyle: .body)\n    label.adjustsFontForContentSizeCategory = true\n    tableView.backgroundView = label\n}",
+      "explanation": "One state transition updates the model and asks the snapshot to represent it. Mixing manual row deletion with diffable updates introduces a second, potentially contradictory update mechanism. Also call updateEmptyState after the initial load and addTask so the message always follows the model.",
+      "checks": [
+        "Delete the first, middle, and last remaining task without an invalid-update crash.",
+        "After deleting all tasks, verify the message is visible.",
+        "Add a task and verify the message disappears."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "What is the safest identity to store in a diffable snapshot for editable tasks?",
+      "options": [
+        "The task's current row number",
+        "A stable UUID created with the task",
+        "The title, because it is visible",
+        "A new UUID every time the screen renders"
+      ],
+      "answer": 1,
+      "explanation": "Position and title can change. A stable identifier lets UIKit distinguish an existing item's changed content from an insertion or removal."
+    },
+    {
+      "question": "A task title changes, but its UUID stays the same. What should update the visible row?",
+      "options": [
+        "Only change the dictionary and do nothing else",
+        "Remove the table from its superview",
+        "Update the model and reconfigure the existing identifier",
+        "Change every UUID"
+      ],
+      "answer": 2,
+      "explanation": "The snapshot's identifiers have not changed. Reconfiguration tells the cell provider to render current content for that existing item."
+    },
+    {
+      "question": "Why should custom cell constraints reference contentView?",
+      "options": [
+        "It makes every cell the same height",
+        "UITableView ignores subviews outside it",
+        "It is the intended container and participates in cell layout and self-sizing",
+        "It prevents networking requests"
+      ],
+      "answer": 2,
+      "explanation": "The content view is UIKit's supported container for a cell's primary custom content. Correct edge-to-edge vertical constraints enable fitting-size calculation."
+    },
+    {
+      "question": "Where should a completed task's persistent state live?",
+      "options": [
+        "Only in the cell's accessoryType",
+        "In the model or repository",
+        "Only in prepareForReuse",
+        "In the current index path"
+      ],
+      "answer": 1,
+      "explanation": "A cell is a temporary presentation object. Model state must survive scrolling, navigation, reordering, and reconstruction of views."
+    },
+    {
+      "question": "What does prefetching guarantee?",
+      "options": [
+        "Every row is prefetched before display",
+        "A fixed number of requests",
+        "Nothing about correctness; it is an opportunity to prepare data early",
+        "That no cancellation logic is needed"
+      ],
+      "answer": 2,
+      "explanation": "Prefetch callbacks are hints. Display logic must still handle missing data, repeated requests, and work that becomes unnecessary."
+    }
+  ],
+  "pitfalls": [
+    "Generating new item IDs whenever you apply a snapshot.",
+    "Capturing the controller strongly in a retained cell-provider closure.",
+    "Configuring only one branch of accessories, colors, or placeholders.",
+    "Combining manual insertRows/deleteRows with a diffable data source.",
+    "Performing synchronous network or image-decoding work during cell configuration."
+  ],
+  "checkpoint": [
+    "Explain why an index path is not a stable model identifier.",
+    "Toggle and add tasks while preserving old UUIDs.",
+    "Show a long title without clipping at a larger text size.",
+    "Trace one reused cell through two different model configurations.",
+    "Describe how remote deletion would recover if the server rejects it."
+  ],
+  "references": [
+    {
+      "title": "UITableView",
+      "url": "https://developer.apple.com/documentation/uikit/uitableview"
+    },
+    {
+      "title": "UITableViewDiffableDataSource",
+      "url": "https://developer.apple.com/documentation/uikit/uitableviewdiffabledatasource"
+    },
+    {
+      "title": "NSDiffableDataSourceSnapshot",
+      "url": "https://developer.apple.com/documentation/uikit/nsdiffabledatasourcesnapshot"
+    }
+  ],
+  "capstone": {
+    "title": "PocketTasks milestone: the task inbox",
+    "steps": [
+      "Replace static labels with the diffable task list.",
+      "Support creating, toggling, and removing tasks through stable identifiers.",
+      "Add an empty state and document which class owns the task models.",
+      "Manually test a long list, large text, and repeated add/delete operations."
+    ]
+  }
+}

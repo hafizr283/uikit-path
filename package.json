@@ -1,0 +1,14 @@
+{
+  "name": "uikit-path",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A practical 20-day UIKit course with exercises, quizzes, and a UI workbench.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "validate": "node scripts/validate.mjs"
+  }
+}

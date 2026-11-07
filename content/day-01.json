@@ -1,0 +1,236 @@
+{
+  "day": 1,
+  "title": "Swift that holds up in a real app",
+  "subtitle": "Model data, make invalid states explicit, and choose useful boundaries.",
+  "phase": "Foundations",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Choose value or reference semantics based on ownership and identity.",
+    "Model optional data and mutually exclusive screen states safely.",
+    "Use closures, protocols, generics, and access control to keep code understandable.",
+    "Build PocketTasks models with validation and stable identity."
+  ],
+  "prerequisites": [
+    "Basic Swift variables, functions, loops, and types.",
+    "Xcode on a Mac for native work; today's Foundation example can also run in a compatible Swift environment."
+  ],
+  "sections": [
+    {
+      "title": "Value and reference semantics",
+      "body": [
+        "A struct is a value: assignment creates an independent logical value. A class is a reference: two variables can refer to the same instance, so mutations through one reference are visible through the other. Use structs for task data, filters, and API responses. Use classes when shared identity or a lifecycle matters, such as view controllers and services owning an ongoing connection.",
+        "Copy-on-write optimizes storage for standard collections without changing their value semantics. A struct containing a class instance can nevertheless share that referenced object. Also, let prevents replacing a class reference but does not freeze its mutable properties. When editing a task, a draft value makes the save boundary explicit; sharing one mutable object requires you to coordinate immediate changes between screens."
+      ]
+    },
+    {
+      "title": "Types should explain absence and alternatives",
+      "body": [
+        "An optional means something can be absent, but you must define why. A nil due date may mean no deadline; a missing server identifier may mean the response is invalid. Use if let for conditional work and guard let when the rest of the operation requires the value. Replacing every missing value with an empty string can hide a broken contract.",
+        "An enum with associated values represents alternatives that cannot coexist: idle, loading, loaded([TaskItem]), or failed(String). Independent flags can accidentally claim that the screen is loading and failed simultaneously. Name your model TaskItem instead of Task so it does not compete with Swift's concurrency type. Prefer distinct validation errors over a Boolean when the UI must explain the failure."
+      ]
+    },
+    {
+      "title": "Closures carry behavior and capture context",
+      "body": [
+        "A closure is behavior that can be passed to another function, stored, and called later. A sorting predicate is usually consumed immediately; a completion handler may outlive the function that receives it. Mark a closure parameter @escaping when the function stores it or passes it to escaping work. This says nothing about which thread executes it.",
+        "Closures capture surrounding values and references. That makes button callbacks convenient but also creates ownership relationships, which Day 2 explores. map transforms elements, filter selects them, and compactMap transforms while discarding nil results. Use these operations to clarify intent. If shorthand parameters make a multi-step expression difficult to read, name the parameters or write a normal loop."
+      ]
+    },
+    {
+      "title": "Protocols and generics make dependencies explicit",
+      "body": [
+        "A protocol describes capabilities. A TaskReading dependency can provide tasks without exposing whether they came from a file, API, or fixture array. Supplying that dependency from outside is dependency injection. A consumer can then be tested with a controlled implementation instead of reaching into shared global state.",
+        "Generics preserve type relationships: a function receiving [T] can return T? without converting the element to Any and casting it back. An existential such as any TaskReading stores any conforming value; a generic parameter T: TaskReading preserves its specific type. Both have uses. Do not create a protocol for every type automatically; introduce one when a real boundary or alternative implementation benefits from it."
+      ]
+    },
+    {
+      "title": "Protect model invariants",
+      "body": [
+        "An invariant is something that must remain true, such as a task title containing meaningful text. Validate at creation and mutation boundaries instead of asking every screen to remember the rule. private(set) permits public reading but limits writes to the declaring type, where a method such as rename(to:) can enforce the invariant.",
+        "Use throws when the caller needs to distinguish reasons for failure. A failable initializer returning nil can be appropriate when the reason is irrelevant. Keep models independent of UILabel and UIAlertController: models describe data and failures, while UIKit presents them. Access control, useful errors, and small explicit types prevent more bugs than adding layers before the app needs them."
+      ]
+    }
+  ],
+  "example": {
+    "title": "Validated tasks with an interchangeable reader",
+    "filename": "Day01Models.swift",
+    "code": "import Foundation\n\nenum TaskValidationError: Error { case emptyTitle }\nenum Priority: String, Codable { case low, normal, high }\n\nstruct TaskItem: Identifiable, Equatable {\n    let id: UUID\n    private(set) var title: String\n    var priority: Priority\n    private(set) var isComplete: Bool\n\n    init(id: UUID = UUID(), title: String,\n         priority: Priority = .normal) throws {\n        let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)\n        guard !clean.isEmpty else { throw TaskValidationError.emptyTitle }\n        self.id = id\n        self.title = clean\n        self.priority = priority\n        self.isComplete = false\n    }\n\n    mutating func rename(to proposedTitle: String) throws {\n        let clean = proposedTitle.trimmingCharacters(in: .whitespacesAndNewlines)\n        guard !clean.isEmpty else { throw TaskValidationError.emptyTitle }\n        title = clean\n    }\n\n    mutating func toggleCompletion() { isComplete.toggle() }\n}\n\nprotocol TaskReading { func allTasks() -> [TaskItem] }\n\nstruct MemoryTaskReader: TaskReading {\n    let items: [TaskItem]\n    func allTasks() -> [TaskItem] { items }\n}\n\nfunc pendingTitles(from reader: any TaskReading) -> [String] {\n    reader.allTasks().filter { !$0.isComplete }.map { $0.title }\n}\n\nfunc firstMatch<T>(in values: [T], matching predicate: (T) -> Bool) -> T? {\n    values.first(where: predicate)\n}\n\nfunc runDay01Example() {\n    do {\n        let original = try TaskItem(title: \"  Learn Auto Layout  \")\n        var draft = original\n        try draft.rename(to: \"Practice constraints\")\n        draft.toggleCompletion()\n        let reader = MemoryTaskReader(items: [original, draft])\n        print(original.title)\n        print(draft.title, draft.isComplete)\n        print(pendingTitles(from: reader))\n    } catch {\n        print(\"Validation failed:\", error)\n    }\n}",
+    "walkthrough": [
+      "Paste the whole example into a Swift playground and add runDay01Example() at the bottom. In an app source file, keep the function declaration and call it from temporary debug code rather than adding a top-level expression.",
+      "The initializer trims input and either produces a valid model or throws. Outside callers cannot directly assign title or isComplete.",
+      "Assigning original to draft creates an independent value but preserves its id: this is an edited draft of the same logical task, not a newly created task.",
+      "pendingTitles only needs TaskReading. Replace the in-memory reader with a real service later without changing the consumer.",
+      "firstMatch is an additional generic helper. It preserves the concrete array element type and communicates absence with an optional."
+    ],
+    "expectedOutput": "Learn Auto Layout\nPractice constraints true\n[\"Learn Auto Layout\"]"
+  },
+  "exercises": [
+    {
+      "id": "d01-warmup",
+      "title": "Find the urgent unfinished task",
+      "difficulty": "Warm-up",
+      "prompt": "Using the example models, return the first high-priority task that is unfinished. Do not invent a placeholder when there is no match.",
+      "requirements": [
+        "Preserve array order.",
+        "Do not force unwrap or mutate input.",
+        "Return an optional."
+      ],
+      "starterCode": "func firstUrgent(in tasks: [TaskItem]) -> TaskItem? {\n    // Implement\n}",
+      "hints": [
+        "Combine conditions with &&.",
+        "Use first(where:)."
+      ],
+      "solution": "func firstUrgent(in tasks: [TaskItem]) -> TaskItem? {\n    tasks.first { $0.priority == .high && !$0.isComplete }\n}",
+      "explanation": "first(where:) communicates that you want one existing element. The optional lets the caller display a useful empty state rather than accidentally treating fabricated data as real.",
+      "checks": [
+        "An empty array returns nil.",
+        "Completed urgent tasks are skipped.",
+        "Two matches return the earlier one."
+      ]
+    },
+    {
+      "id": "d01-core",
+      "title": "Create a validated title value",
+      "difficulty": "Core",
+      "prompt": "Create an independent ValidatedTitle that trims input and rejects blank input or more than 80 Swift Characters. Return distinct errors so the form can give precise feedback.",
+      "requirements": [
+        "Use a throwing initializer.",
+        "Expose a read-only value.",
+        "Measure the cleaned string and keep UIKit out of the type."
+      ],
+      "starterCode": "import Foundation\nstruct ValidatedTitle {\n    let value: String\n    init(_ raw: String) throws {\n        // Validate\n    }\n}",
+      "hints": [
+        "String.count counts extended grapheme clusters.",
+        "Use an error enum with separate cases."
+      ],
+      "solution": "import Foundation\n\nenum TitleError: Error {\n    case blank\n    case tooLong(maximum: Int)\n}\n\nstruct ValidatedTitle {\n    let value: String\n\n    init(_ raw: String) throws {\n        let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)\n        guard !clean.isEmpty else { throw TitleError.blank }\n        guard clean.count <= 80 else { throw TitleError.tooLong(maximum: 80) }\n        value = clean\n    }\n}",
+      "explanation": "Every successfully created instance satisfies the same rule. A production client and server must agree on length measurement: a backend may count bytes rather than user-perceived characters.",
+      "checks": [
+        "Whitespace-only input throws blank.",
+        "80 characters succeed and 81 throw tooLong.",
+        "Successful values have surrounding whitespace removed."
+      ]
+    },
+    {
+      "id": "d01-stretch",
+      "title": "Replace conflicting state flags",
+      "difficulty": "Stretch",
+      "prompt": "Represent a task-list screen with an enum and write a status message function. Include ready, loading, loaded tasks, and failure.",
+      "requirements": [
+        "Use associated values.",
+        "Distinguish empty success from failure.",
+        "Use an exhaustive switch without default."
+      ],
+      "starterCode": "enum TaskListState {\n    // Cases\n}\nfunc statusMessage(for state: TaskListState) -> String {\n    // Switch\n}",
+      "hints": [
+        "An empty array is a valid loaded result.",
+        "Bind associated values with let."
+      ],
+      "solution": "enum TaskListState {\n    case idle\n    case loading\n    case loaded([TaskItem])\n    case failed(String)\n}\n\nfunc statusMessage(for state: TaskListState) -> String {\n    switch state {\n    case .idle: return \"Ready to load\"\n    case .loading: return \"Loading tasks…\"\n    case .loaded(let tasks):\n        return tasks.isEmpty ? \"No tasks yet\" : \"\\(tasks.count) tasks\"\n    case .failed(let message): return \"Could not load: \\(message)\"\n    }\n}",
+      "explanation": "The state cannot be loading and failed at once. Adding a new enum case makes the compiler identify consumers that need updating. Localize presentation strings when the app reaches production UI work.",
+      "checks": [
+        "loaded([]) displays an empty message.",
+        "loading carries no stale failure text.",
+        "A new enum case requires updating the switch."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "What does assigning a struct containing only value-type fields produce?",
+      "options": [
+        "A shared mutable object.",
+        "An independent logical value.",
+        "An invalid original variable.",
+        "An automatic class conversion."
+      ],
+      "answer": 1,
+      "explanation": "Structs have value semantics, regardless of copy-on-write storage optimizations."
+    },
+    {
+      "question": "Which design is a good use of associated-value enums?",
+      "options": [
+        "A screen that is loading, loaded with tasks, or failed with an error.",
+        "Three unrelated counters.",
+        "A mutable global singleton.",
+        "Replacing all nil values with empty text."
+      ],
+      "answer": 0,
+      "explanation": "Mutually exclusive alternatives with different associated data are naturally expressed by an enum."
+    },
+    {
+      "question": "What does @escaping describe?",
+      "options": [
+        "Background execution.",
+        "A guaranteed delayed invocation.",
+        "A closure that may outlive the receiving function call.",
+        "Automatic weak capture."
+      ],
+      "answer": 2,
+      "explanation": "Escaping describes lifetime. Scheduling and ownership are independent concerns."
+    },
+    {
+      "question": "Why use private(set) for a validated title?",
+      "options": [
+        "It freezes the property everywhere.",
+        "It permits reading while funneling writes through controlled operations.",
+        "It persists the value.",
+        "It validates every string automatically."
+      ],
+      "answer": 1,
+      "explanation": "The declaring type can mutate the value while protecting its invariants from external writes."
+    },
+    {
+      "question": "What does returning T? preserve compared with Any?",
+      "options": [
+        "The original element-type relationship.",
+        "A guarantee that nil is impossible.",
+        "Thread safety.",
+        "JSON decoding."
+      ],
+      "answer": 0,
+      "explanation": "Generics preserve static type information so callers do not need casts."
+    }
+  ],
+  "pitfalls": [
+    "Force unwrapping user input turns recoverable absence into a crash.",
+    "A let class reference does not freeze the instance's properties.",
+    "Unrestricted property writes can bypass model validation.",
+    "Speculative protocols can make a tiny feature harder to understand.",
+    "Synthesized Decodable can bypass a custom validating initializer; revisit this before decoding network models."
+  ],
+  "checkpoint": [
+    "Explain struct and class assignment using an editing example.",
+    "Create and rename a task without force unwrapping.",
+    "Supply a protocol consumer with an in-memory dependency.",
+    "Describe all legal task-list states.",
+    "Predict the example's output before running it."
+  ],
+  "references": [
+    {
+      "title": "Swift — Structures and Classes",
+      "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/classesandstructures/"
+    },
+    {
+      "title": "Swift — Closures",
+      "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/closures/"
+    },
+    {
+      "title": "Swift — Protocols",
+      "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/protocols/"
+    },
+    {
+      "title": "Swift — Error Handling",
+      "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/errorhandling/"
+    }
+  ],
+  "capstone": {
+    "title": "Define PocketTasks' domain",
+    "steps": [
+      "Create a Models folder with TaskItem, Priority, and validation errors.",
+      "Write down the meaning of an optional due date before adding it.",
+      "Create fixture tasks and an unfinished-task filter.",
+      "Keep the domain independent of UIKit and document the title-length rule."
+    ]
+  }
+}

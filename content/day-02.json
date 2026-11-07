@@ -1,0 +1,236 @@
+{
+  "day": 2,
+  "title": "ARC, ownership, and memory leaks",
+  "subtitle": "Understand who keeps an object alive and make screen lifetimes predictable.",
+  "phase": "Foundations",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Draw strong-reference graphs and identify retain cycles.",
+    "Choose strong, weak, or unowned with a lifetime argument.",
+    "Capture self safely in stored closures and delegate relationships.",
+    "Distinguish an ownership leak from work that is still legitimately running."
+  ],
+  "prerequisites": [
+    "Day 1 value/reference semantics and closures.",
+    "A Swift playground for the main example; Xcode Memory Graph for the optional UIKit inspection."
+  ],
+  "sections": [
+    {
+      "title": "ARC answers a precise ownership question",
+      "body": [
+        "Automatic Reference Counting tracks strong references to class instances. An object can be released when no strong owners remain. Structs and enums are values, although they may contain references to class instances. Draw boxes for objects and arrows for strong references whenever a lifetime feels mysterious; variable names alone do not tell you whether two properties point to the same object.",
+        "UIKit has its own expected ownership graph. A navigation controller keeps its stack of child controllers alive, a view controller normally owns its view, and views own their subviews. Removing a screen from the navigation stack removes one owner, but a singleton, closure, timer, or active operation may still retain it. deinit logging is a useful observation tool, but absence of a log is only the start of diagnosis, not proof of a specific retain cycle."
+      ]
+    },
+    {
+      "title": "Strong, weak, and unowned are different promises",
+      "body": [
+        "A strong reference keeps an instance alive. A weak reference does not, and automatically becomes nil after the referenced object is destroyed; weak stored properties must be mutable optionals. A class-bound protocol declared with AnyObject can be used by a weak delegate property. Weak is appropriate when the referenced object may legitimately disappear before you use it.",
+        "An unowned reference also does not keep an object alive but normally assumes the object still exists when accessed. If that lifetime guarantee is wrong, access traps. Do not select unowned merely to avoid optional syntax. UIKit screens can be dismissed, services can complete later, and navigation can change unexpectedly; weak is usually the more robust callback choice unless the ownership relationship proves otherwise."
+      ]
+    },
+    {
+      "title": "A stored closure can complete a cycle",
+      "body": [
+        "Suppose a screen owns a view model, the view model stores onChange, and onChange captures the screen strongly. The graph is screen → view model → closure → screen. Releasing the external screen reference cannot break that loop. [weak self] breaks the closure's ownership of the screen; after the screen disappears, self is nil and the callback can return safely.",
+        "Weak capture is not a universal decoration. A short nonescaping array transformation usually has no long-lived cycle. A closure that must finish an operation may intentionally retain a worker. When you write guard let self inside a weak-capturing closure, that local binding keeps the object alive for the remainder of that invocation. If it spans an await, the lifetime extends across the suspension too; the weak capture does not mean the object can disappear in the middle of that scope."
+      ]
+    },
+    {
+      "title": "Delegates communicate without owning the parent",
+      "body": [
+        "A child editor can notify its parent with a delegate protocol or callback. Usually the parent owns or presents the child, so the child should not strongly own the parent through its delegate. Declare the protocol class-bound and the delegate weak. The delegate can be nil because there may be no observer, or because the observer has already been released.",
+        "Do not confuse delegates with data ownership. A service or repository that the screen needs to function is often a strong dependency. Making every dependency weak causes unexpected nil values and lost work. Ask which object should own which responsibility: the screen strongly owns its model; a feedback callback points weakly back to the screen; the application composition root may own a shared service for the session."
+      ]
+    },
+    {
+      "title": "Stopping work is separate from releasing memory",
+      "body": [
+        "Timers, notification observers, subscriptions, and unstructured tasks can keep work alive independently of a visible screen. A weak callback can prevent a cycle while the timer still fires forever. Cancellation, invalidation, or observer removal is an explicit lifecycle decision. Tie it to the lifetime that the work serves: a particular appearance, a screen instance, or an application session.",
+        "Use Memory Graph to inspect paths retaining a dismissed controller, and use Instruments when you need allocation trends over repeated navigation. Repeat an enter/leave flow several times; a continually growing number of old controllers is stronger evidence than one delayed release. Also inspect caches and image sizes: high memory use can be intentional retained data rather than a retain cycle. A correct fix should explain both the ownership graph and how ongoing work ends."
+      ]
+    }
+  ],
+  "example": {
+    "title": "A callback that does not retain its editor",
+    "filename": "Day02Ownership.swift",
+    "code": "import Foundation\n\nfinal class SaveCallbacks {\n    var onSave: (() -> Void)?\n}\n\nfinal class TaskEditor {\n    private let callbacks: SaveCallbacks\n    private var title = \"Review ARC\"\n\n    init(callbacks: SaveCallbacks) {\n        self.callbacks = callbacks\n    }\n\n    func connect() {\n        callbacks.onSave = { [weak self] in\n            guard let self else {\n                print(\"Editor is gone; ignore the callback\")\n                return\n            }\n            print(\"Saving:\", self.title)\n        }\n    }\n\n    deinit {\n        print(\"TaskEditor released\")\n    }\n}\n\nfunc runDay02Example() {\n    let callbacks = SaveCallbacks()\n    var editor: TaskEditor? = TaskEditor(callbacks: callbacks)\n    editor?.connect()\n    callbacks.onSave?()\n    editor = nil\n    callbacks.onSave?()\n    callbacks.onSave = nil\n}",
+    "walkthrough": [
+      "Paste the complete code into a Swift playground and invoke runDay02Example(). It deliberately uses Foundation and ordinary classes so the ownership graph is visible without UIKit setup.",
+      "The local callbacks variable owns the callback store. While editor is non-nil, the editor also owns that same store.",
+      "The store owns its closure, but the closure only weakly references the editor. There is no strong path back to the editor.",
+      "Setting editor to nil removes the editor's final strong owner. Its deinit message appears even though the callback store remains alive.",
+      "Invoke the stored callback after release: the guard handles nil and does not access a destroyed object. For comparison, temporarily capture self strongly, observe the missing deinit before cleanup, then restore the weak version."
+    ],
+    "expectedOutput": "Saving: Review ARC\nTaskEditor released\nEditor is gone; ignore the callback"
+  },
+  "exercises": [
+    {
+      "id": "d02-warmup",
+      "title": "Explain and repair the cycle",
+      "difficulty": "Warm-up",
+      "prompt": "A Loader stores a completion closure and a Screen owns its Loader. Repair the callback so the screen can be released while the loader is retained elsewhere.",
+      "requirements": [
+        "Keep the loader as a strong dependency.",
+        "Use a weak capture for the reference back to the screen.",
+        "Do not use unowned or force unwrap."
+      ],
+      "starterCode": "final class Loader { var completion: (() -> Void)? }\nfinal class Screen {\n    let loader: Loader\n    init(loader: Loader) { self.loader = loader }\n    func start() {\n        loader.completion = { self.showResult() }\n    }\n    func showResult() { print(\"Ready\") }\n}",
+      "hints": [
+        "Draw Screen → Loader → closure → Screen.",
+        "Only the backward edge needs to stop owning the screen."
+      ],
+      "solution": "final class Loader { var completion: (() -> Void)? }\nfinal class Screen {\n    let loader: Loader\n    init(loader: Loader) { self.loader = loader }\n    func start() {\n        loader.completion = { [weak self] in\n            self?.showResult()\n        }\n    }\n    func showResult() { print(\"Ready\") }\n}",
+      "explanation": "The screen still owns a loader it depends on, but the callback no longer owns the screen. This is memory-safe if the callback arrives after dismissal. A real loader may also need cancellation so irrelevant work stops.",
+      "checks": [
+        "The screen can be released while another variable owns loader.",
+        "Calling completion after release does not crash.",
+        "The dependency does not disappear while the screen needs it."
+      ]
+    },
+    {
+      "id": "d02-core",
+      "title": "Use a weak editor delegate",
+      "difficulty": "Core",
+      "prompt": "Implement a child editor that reports a saved title to a parent without owning the parent. Keep the example independent of UIKit so you can inspect its lifetime in a playground.",
+      "requirements": [
+        "Use a class-bound protocol.",
+        "Make delegate a weak optional.",
+        "Notify through a method and handle no delegate safely."
+      ],
+      "starterCode": "protocol TitleEditorDelegate: AnyObject {\n    func editorDidSave(title: String)\n}\nfinal class TitleEditor {\n    // Delegate and save method\n}",
+      "hints": [
+        "weak var delegate: (any TitleEditorDelegate)?",
+        "Optional chaining makes absence a normal case."
+      ],
+      "solution": "protocol TitleEditorDelegate: AnyObject {\n    func editorDidSave(title: String)\n}\n\nfinal class TitleEditor {\n    weak var delegate: (any TitleEditorDelegate)?\n\n    func save(title: String) {\n        delegate?.editorDidSave(title: title)\n    }\n}\n\nfinal class ParentScreen: TitleEditorDelegate {\n    let editor = TitleEditor()\n\n    init() { editor.delegate = self }\n\n    func editorDidSave(title: String) {\n        print(\"Parent received:\", title)\n    }\n}",
+      "explanation": "The parent strongly owns the child. The child points back through a weak delegate, so there is no ownership loop. In real UIKit code, mark UI-facing protocols and classes @MainActor so callback isolation is also explicit.",
+      "checks": [
+        "Saving without a delegate is safe.",
+        "A live parent receives the title.",
+        "Releasing the parent does not leave it retained solely by delegate."
+      ]
+    },
+    {
+      "id": "d02-stretch",
+      "title": "Capture a snapshot instead of a changing reference",
+      "difficulty": "Stretch",
+      "prompt": "Create a function that returns a closure describing the current task title. The returned closure must preserve the title at creation time even if the source draft is edited afterward.",
+      "requirements": [
+        "Use a class source to make reference semantics visible.",
+        "Capture only the String value needed by the closure.",
+        "Explain why retaining the whole draft is unnecessary."
+      ],
+      "starterCode": "final class Draft {\n    var title: String\n    init(title: String) { self.title = title }\n}\nfunc makeSummary(for draft: Draft) -> () -> String {\n    // Capture the title now\n}",
+      "hints": [
+        "A capture list can bind an expression to a local name.",
+        "String is a value type."
+      ],
+      "solution": "final class Draft {\n    var title: String\n    init(title: String) { self.title = title }\n}\n\nfunc makeSummary(for draft: Draft) -> () -> String {\n    { [title = draft.title] in \"Draft: \\(title)\" }\n}\n\nfunc demonstrateSnapshot() {\n    let draft = Draft(title: \"Original\")\n    let summary = makeSummary(for: draft)\n    draft.title = \"Edited\"\n    print(summary()) // Draft: Original\n}",
+      "explanation": "The closure captures the title's value at creation time. It does not retain Draft, and later edits do not change the summary. Capturing a value is useful when the behavior explicitly needs a snapshot rather than live state.",
+      "checks": [
+        "The output remains Original after editing the draft.",
+        "The closure has no need to retain Draft.",
+        "A newly created summary reflects the newly edited title."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "Which graph contains a strong-reference cycle?",
+      "options": [
+        "Screen strongly owns Loader; Loader's callback weakly references Screen.",
+        "Parent strongly owns Child; Child has a weak parent delegate.",
+        "Screen strongly owns Loader; Loader strongly owns a closure that strongly captures Screen.",
+        "Two independent struct values have the same identifier."
+      ],
+      "answer": 2,
+      "explanation": "Every edge in that loop owns the next object, so external reference removal cannot make the counts reach zero."
+    },
+    {
+      "question": "What happens to a weak reference after its target is destroyed?",
+      "options": [
+        "It becomes nil.",
+        "It becomes an unowned reference.",
+        "It retains a hidden backup object.",
+        "It must be manually cleared before access."
+      ],
+      "answer": 0,
+      "explanation": "Weak references are automatically zeroed and therefore stored as mutable optionals."
+    },
+    {
+      "question": "When is unowned appropriate?",
+      "options": [
+        "Whenever optional chaining looks verbose.",
+        "When a valid lifetime guarantee ensures the referenced object exists on every access.",
+        "For every network callback.",
+        "When the delegate can disappear independently."
+      ],
+      "answer": 1,
+      "explanation": "Unowned is a lifetime promise. Accessing an ordinary unowned reference after destruction traps."
+    },
+    {
+      "question": "Does a weak capture automatically cancel a repeating timer?",
+      "options": [
+        "Yes, immediately.",
+        "Only if the timer runs on the main thread.",
+        "No; ownership and ongoing work need separate handling.",
+        "Only for UIViewController."
+      ],
+      "answer": 2,
+      "explanation": "Weak capture can avoid retaining the observer while the timer continues running. Invalidate or cancel work explicitly."
+    },
+    {
+      "question": "What does guard let self inside a weak-capturing closure do?",
+      "options": [
+        "Permanently makes the original capture strong.",
+        "Creates a strong local reference for the remaining scope if self is alive.",
+        "Guarantees deinit before the closure finishes.",
+        "Makes the closure nonescaping."
+      ],
+      "answer": 1,
+      "explanation": "The local strong binding keeps the object alive for its scope, potentially including suspension points in an async closure."
+    }
+  ],
+  "pitfalls": [
+    "Using weak for every dependency can cause required services to vanish.",
+    "Using unowned for a callback with an uncertain lifetime can crash.",
+    "A weak callback may fix ownership while leaving timers or network work active.",
+    "A closure may retain only part of a graph, so inspect the actual path rather than guessing.",
+    "deinit not printing immediately does not by itself identify which object retains the screen."
+  ],
+  "checkpoint": [
+    "Draw and repair a three-node retain cycle.",
+    "Explain why weak delegates require class-bound protocols.",
+    "Predict the main example's complete output.",
+    "Distinguish a memory leak from intentionally retained cache data.",
+    "Name an explicit cancellation point for screen-specific asynchronous work."
+  ],
+  "references": [
+    {
+      "title": "Swift — Automatic Reference Counting",
+      "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/automaticreferencecounting/"
+    },
+    {
+      "title": "Swift — Closures and Capture Lists",
+      "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/closures/"
+    },
+    {
+      "title": "Apple — Gathering information about memory use",
+      "url": "https://developer.apple.com/documentation/xcode/gathering-information-about-memory-use"
+    },
+    {
+      "title": "Apple — Timer",
+      "url": "https://developer.apple.com/documentation/foundation/timer"
+    }
+  ],
+  "capstone": {
+    "title": "Define PocketTasks' ownership rules",
+    "steps": [
+      "Document which object owns the task repository and which owns each screen.",
+      "Add a weak callback or delegate contract for saving an edited task.",
+      "Add temporary deinit logging when implementing the editor controller later.",
+      "Record when task-list work should stop on navigation; do not rely solely on deinit cleanup."
+    ]
+  }
+}

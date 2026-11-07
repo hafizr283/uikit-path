@@ -1,0 +1,237 @@
+{
+  "day": 7,
+  "title": "Reusable UIKit components and interaction",
+  "subtitle": "Separate rendering from business logic, configure every state, and add purposeful motion.",
+  "phase": "Foundations",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Build reusable UIView components with small configuration and event APIs.",
+    "Keep navigation, persistence, and domain decisions outside presentation components.",
+    "Understand gestures, hit testing, and control interactions.",
+    "Animate state changes while respecting interrupted interactions and Reduce Motion."
+  ],
+  "prerequisites": [
+    "Days 2–6: weak captures, layout, controls, and navigation.",
+    "A UIKit app target on iOS 17 or later.",
+    "Be ready to test a component with more than one configuration."
+  ],
+  "sections": [
+    {
+      "title": "A reusable component has a focused contract",
+      "body": [
+        "A task card should render a title, notes, and completion state, then emit an intent such as toggle requested. It should not decide which repository to save to or which screen to push. Give the view a configuration value and a callback or delegate for user actions. This separates what the interface looks like from what the app decides to do.",
+        "A custom UIView is useful when a group of controls has a repeated visual structure or interaction. Do not extract every two-line label into its own abstraction just to make files smaller. A good component API hides its internal stack and constraints while exposing meaningful operations such as configure(with:). Keeping labels private prevents callers from placing the component into contradictory states."
+      ]
+    },
+    {
+      "title": "Configuration must replace old state completely",
+      "body": [
+        "Views may be reconfigured many times, particularly once you use reusable table and collection cells. A configure method should assign every property that can differ between models: text, images, hidden state, enabled state, accessibility values, and any transient visual state. If you only set isHidden when notes are absent, the next task with notes may remain hidden.",
+        "Render from a complete configuration rather than applying unexplained incremental changes from unrelated callers. Stable model identity becomes important when asynchronous work finishes later; a response for an old configuration must not overwrite a newly configured view. Days 8–12 expand this into cell reuse and image loading. Today, test one view with empty notes, populated notes, complete state, and incomplete state in sequence."
+      ]
+    },
+    {
+      "title": "Construction can use code or a XIB",
+      "body": [
+        "Programmatic views usually configure subviews and constraints in a shared setup method called from the initializer. A required coder initializer can either support Interface Builder construction or fail deliberately with a clear message when the type is programmatic-only. Do not accidentally call the setup method twice or load a XIB whose root recursively creates another copy of the same custom view.",
+        "When using a XIB, check the file owner, custom class, module, outlet connections, and top-level object type. Bundle lookup matters when a component moves into a package or framework. Keep reusable colors, typography, spacing, and corner radii in a small design vocabulary so screens feel related. Semantic system colors adapt to appearance, and text styles adapt to Dynamic Type when you enable adjustment."
+      ]
+    },
+    {
+      "title": "Gestures and hit testing should support the action",
+      "body": [
+        "UIKit hit testing finds the appropriate view to receive a touch, taking hierarchy and visibility into account. A view outside its parent's hit-test bounds may be visible but not receive touches as you expect. Transparent color alone does not make a view ignore interaction. Prefer a real UIButton or UIControl for an action that behaves like a button; you receive accessibility and control semantics without rebuilding them.",
+        "Gesture recognizers are useful for interactions such as a long press or a pan. A continuous recognizer changes state through began, changed, and ended; trigger a one-time menu on began rather than on every callback. Recognizers attached to a container can interfere with buttons and scrolling through touch-cancellation behavior. Decide whether simultaneous recognition is appropriate and test the actual interaction, not just whether the recognizer fires once."
+      ]
+    },
+    {
+      "title": "Animation should communicate a state transition",
+      "body": [
+        "Animate a change that helps the user understand cause and effect: a checkmark appears, a panel expands, or feedback fades in. Change the model first and render a consistent target state. Avoid making the animation itself the source of truth. Constraint animations require layoutIfNeeded on the appropriate common ancestor, while opacity and transforms can be animated directly.",
+        "Respect UIAccessibility.isReduceMotionEnabled by simplifying or removing nonessential motion. Repeated taps can arrive before an animation ends, so either support interruption or intentionally manage availability. UIViewPropertyAnimator is useful for interactive or interruptible transitions. If you use a simple UIView animation, beginFromCurrentState and allowUserInteraction can help avoid obvious jumps and blocked controls, but still test the final model and view state after rapid input."
+      ]
+    }
+  ],
+  "example": {
+    "title": "A task card that emits intent and renders complete state",
+    "filename": "Day07TaskCard.swift",
+    "code": "import UIKit\n\nstruct TaskCardContent {\n    let title: String\n    let notes: String\n    let isComplete: Bool\n}\n\n@MainActor\nfinal class TaskCardView: UIView {\n    var onToggle: (@MainActor () -> Void)?\n    private let titleLabel = UILabel()\n    private let notesLabel = UILabel()\n    private let toggleButton = UIButton(type: .system)\n\n    override init(frame: CGRect) {\n        super.init(frame: frame)\n        setUp()\n    }\n\n    required init?(coder: NSCoder) {\n        super.init(coder: coder)\n        setUp()\n    }\n\n    private func setUp() {\n        backgroundColor = .secondarySystemGroupedBackground\n        layer.cornerRadius = 18\n        titleLabel.font = .preferredFont(forTextStyle: .headline)\n        titleLabel.adjustsFontForContentSizeCategory = true\n        titleLabel.numberOfLines = 0\n        titleLabel.accessibilityTraits.insert(.header)\n        notesLabel.font = .preferredFont(forTextStyle: .body)\n        notesLabel.adjustsFontForContentSizeCategory = true\n        notesLabel.textColor = .secondaryLabel\n        notesLabel.numberOfLines = 0\n        toggleButton.addAction(UIAction { [weak self] _ in\n            self?.onToggle?()\n        }, for: .touchUpInside)\n\n        let stack = UIStackView(arrangedSubviews: [\n            titleLabel, notesLabel, toggleButton\n        ])\n        stack.axis = .vertical\n        stack.spacing = 12\n        stack.translatesAutoresizingMaskIntoConstraints = false\n        addSubview(stack)\n        NSLayoutConstraint.activate([\n            stack.topAnchor.constraint(equalTo: topAnchor, constant: 20),\n            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),\n            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),\n            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -20),\n            toggleButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)\n        ])\n    }\n\n    func configure(with content: TaskCardContent) {\n        titleLabel.text = content.title\n        notesLabel.text = content.notes\n        notesLabel.isHidden = content.notes.isEmpty\n        var config = UIButton.Configuration.tinted()\n        config.title = content.isComplete ? \"Mark unfinished\" : \"Mark complete\"\n        config.image = UIImage(systemName:\n            content.isComplete ? \"checkmark.circle.fill\" : \"circle\"\n        )\n        config.imagePadding = 8\n        toggleButton.configuration = config\n        toggleButton.accessibilityLabel = \"Toggle task completion\"\n        toggleButton.accessibilityValue = content.isComplete ? \"Complete\" : \"Unfinished\"\n    }\n}\n\n@MainActor\nfinal class CardDemoViewController: UIViewController {\n    private let card = TaskCardView(frame: .zero)\n    private var isComplete = false\n\n    override func viewDidLoad() {\n        super.viewDidLoad()\n        title = \"Reusable task card\"\n        view.backgroundColor = .systemGroupedBackground\n        card.translatesAutoresizingMaskIntoConstraints = false\n        view.addSubview(card)\n        NSLayoutConstraint.activate([\n            card.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),\n            card.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),\n            card.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20)\n        ])\n        card.onToggle = { [weak self] in\n            guard let self else { return }\n            self.isComplete.toggle()\n            self.render()\n        }\n        render()\n    }\n\n    private func render() {\n        card.configure(with: TaskCardContent(\n            title: \"Build one reusable component\",\n            notes: \"The controller owns the state; the card renders it.\",\n            isComplete: isComplete\n        ))\n    }\n}",
+    "walkthrough": [
+      "Add the file to the UIKit app and use CardDemoViewController as a navigation root. TaskCardView is a view component, not another view controller.",
+      "The configuration contains all data needed to render the card. configure explicitly sets both empty and nonempty notes behavior and both completion states.",
+      "The card emits onToggle but never edits a model, saves a database record, or performs navigation. The controller changes its state and asks the card to render again.",
+      "Both initializers call one setup method. This supports programmatic creation and basic storyboard/XIB unarchiving, provided Interface Builder is not also duplicating the component's internally created content.",
+      "Toggle several times, increase text size, and configure the same card with different notes. Its view hierarchy stays the same while the content changes."
+    ],
+    "expectedOutput": "A reusable task card whose action alternates between Mark complete and Mark unfinished. The controller owns completion state, and the component updates its button symbol and accessibility value."
+  },
+  "exercises": [
+    {
+      "id": "d07-warmup",
+      "title": "Fix stale hidden state",
+      "difficulty": "Warm-up",
+      "prompt": "A reusable subtitle view hides its label when text is empty, but never unhides it for the next item. Replace the configuration logic with a complete assignment.",
+      "requirements": [
+        "Set the text every time.",
+        "Set isHidden for both empty and nonempty input.",
+        "Do not recreate the label."
+      ],
+      "starterCode": "func configure(subtitle: String) {\n    subtitleLabel.text = subtitle\n    if subtitle.isEmpty { subtitleLabel.isHidden = true }\n}",
+      "hints": [
+        "A Boolean expression can be assigned directly.",
+        "Reconfiguration must replace old state, not only add changes."
+      ],
+      "solution": "// Inside a view type that owns subtitleLabel:\nfunc configure(subtitle: String) {\n    subtitleLabel.text = subtitle\n    subtitleLabel.isHidden = subtitle.isEmpty\n}",
+      "explanation": "The old code only handled the transition into an empty state. Direct assignment makes the result depend solely on the current input, so configuration order no longer changes the result.",
+      "checks": [
+        "Empty then nonempty text makes the label visible again.",
+        "Nonempty then empty text hides it.",
+        "Repeated identical configurations do not create subviews."
+      ]
+    },
+    {
+      "id": "d07-core",
+      "title": "Handle a long press once",
+      "difficulty": "Core",
+      "prompt": "Add a long-press recognizer to a task view. Emit one callback when the press begins, rather than repeatedly during changed and ended states.",
+      "requirements": [
+        "Use a dedicated method with an Objective-C-compatible selector.",
+        "Check recognizer.state.",
+        "Keep the event callback separate from navigation or storage."
+      ],
+      "starterCode": "import UIKit\n@MainActor\nfinal class PressableTaskView: UIView {\n    var onLongPress: (@MainActor () -> Void)?\n    // Install recognizer and handle its state\n}",
+      "hints": [
+        "UILongPressGestureRecognizer is a continuous recognizer.",
+        "The .began state is the one-time start of a recognized press."
+      ],
+      "solution": "import UIKit\n\n@MainActor\nfinal class PressableTaskView: UIView {\n    var onLongPress: (@MainActor () -> Void)?\n\n    override init(frame: CGRect) {\n        super.init(frame: frame)\n        installGesture()\n    }\n\n    required init?(coder: NSCoder) {\n        super.init(coder: coder)\n        installGesture()\n    }\n\n    private func installGesture() {\n        let gesture = UILongPressGestureRecognizer(\n            target: self, action: #selector(handleLongPress(_:))\n        )\n        addGestureRecognizer(gesture)\n    }\n\n    @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {\n        guard recognizer.state == .began else { return }\n        onLongPress?()\n    }\n}",
+      "explanation": "The component reports intent without deciding what the parent should do. Long press must not be the only way to access an essential action: add a visible button or accessibility custom action when integrating it into a real screen.",
+      "checks": [
+        "Holding a press emits one callback, not a stream.",
+        "Ending or cancelling the gesture does not emit another callback.",
+        "The parent can choose a different response without editing the view."
+      ]
+    },
+    {
+      "id": "d07-stretch",
+      "title": "Animate feedback while respecting Reduce Motion",
+      "difficulty": "Stretch",
+      "prompt": "Write a main-actor function that shows or hides an existing feedback label by changing opacity. Use an immediate transition when Reduce Motion is enabled and an interruptible simple animation otherwise.",
+      "requirements": [
+        "The caller owns the actual success/error state.",
+        "Keep the label in layout during the fade.",
+        "Support rapid repeated visibility changes without queuing long animations."
+      ],
+      "starterCode": "@MainActor\nfunc setFeedbackVisible(_ visible: Bool, label: UILabel) {\n    // Update opacity\n}",
+      "hints": [
+        "isHidden does not itself produce an opacity animation.",
+        "beginFromCurrentState starts from the current visual transition."
+      ],
+      "solution": "import UIKit\n\n@MainActor\nfunc setFeedbackVisible(_ visible: Bool, label: UILabel) {\n    let targetAlpha: CGFloat = visible ? 1 : 0\n    label.isHidden = false\n    label.accessibilityElementsHidden = !visible\n    if UIAccessibility.isReduceMotionEnabled {\n        label.layer.removeAllAnimations()\n        label.alpha = targetAlpha\n        return\n    }\n    UIView.animate(\n        withDuration: 0.2,\n        delay: 0,\n        options: [.beginFromCurrentState, .allowUserInteraction]\n    ) {\n        label.alpha = targetAlpha\n    }\n}",
+      "explanation": "Opacity changes presentation, while the caller's state remains authoritative. Keeping the label in layout avoids a simultaneous jump in surrounding geometry. The accessibility setting prevents visually hidden feedback from remaining in the accessibility sequence. For a layout-collapsing message, design a separate stack/constraint transition.",
+      "checks": [
+        "Reduce Motion causes an immediate state change.",
+        "Rapid show/hide calls settle on the latest requested opacity.",
+        "Hidden feedback is removed from accessibility exposure without removing its layout space."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "What should a reusable task card normally do when its completion button is tapped?",
+      "options": [
+        "Choose a database and save directly.",
+        "Push a hardcoded detail screen.",
+        "Emit an intent that its owner handles.",
+        "Look up a global controller."
+      ],
+      "answer": 2,
+      "explanation": "The component renders and reports interaction; its owner controls domain behavior and navigation."
+    },
+    {
+      "question": "Why must configure assign isHidden for both true and false cases?",
+      "options": [
+        "Views can retain state from earlier configurations.",
+        "UIKit resets it automatically otherwise.",
+        "Hidden views cannot contain labels.",
+        "It avoids every need for testing."
+      ],
+      "answer": 0,
+      "explanation": "A reused or reconfigured view retains properties unless new configuration replaces them."
+    },
+    {
+      "question": "When should a one-time action for a long press usually fire?",
+      "options": [
+        "On every state change.",
+        "Only at .began.",
+        "Only in deinit.",
+        "Whenever the view lays out."
+      ],
+      "answer": 1,
+      "explanation": "The recognizer transitions through multiple states; began identifies the start of a recognized press."
+    },
+    {
+      "question": "What is usually preferable for an ordinary accessible tap action?",
+      "options": [
+        "A UILabel with hidden gesture behavior.",
+        "A UIButton or appropriate UIControl.",
+        "A transparent window above the app.",
+        "A global touch override."
+      ],
+      "answer": 1,
+      "explanation": "Controls provide established interaction, accessibility, and state semantics."
+    },
+    {
+      "question": "What should remain the source of truth during an animation?",
+      "options": [
+        "The animation's elapsed percentage only.",
+        "The view's model or explicit UI state.",
+        "The most recent screenshot.",
+        "The screen's fixed pixel coordinates."
+      ],
+      "answer": 1,
+      "explanation": "Animations communicate a transition between states; they should not replace the actual state model."
+    }
+  ],
+  "pitfalls": [
+    "Exposing all internal labels lets callers create inconsistent component states.",
+    "Incremental configuration can leave stale hidden, enabled, or image values.",
+    "Calling shared setup twice duplicates constraints and event handlers.",
+    "A recognizer on a container can cancel touches intended for a nested button.",
+    "Essential actions need an accessible alternative to an undiscoverable gesture."
+  ],
+  "checkpoint": [
+    "Explain the component's input and event contract in one sentence.",
+    "Configure one view with multiple models in different orders.",
+    "Trace ownership of the card, button action, and controller callback.",
+    "Test a gesture's began, changed, cancelled, and ended behavior.",
+    "Demonstrate feedback with Reduce Motion enabled and with rapid input."
+  ],
+  "references": [
+    {
+      "title": "Apple — UIView",
+      "url": "https://developer.apple.com/documentation/uikit/uiview"
+    },
+    {
+      "title": "Apple — UIGestureRecognizer",
+      "url": "https://developer.apple.com/documentation/uikit/uigesturerecognizer"
+    },
+    {
+      "title": "Apple — UIViewPropertyAnimator",
+      "url": "https://developer.apple.com/documentation/uikit/uiviewpropertyanimator"
+    },
+    {
+      "title": "Apple — UIAccessibility",
+      "url": "https://developer.apple.com/documentation/uikit/uiaccessibility"
+    }
+  ],
+  "capstone": {
+    "title": "Extract PocketTasks' reusable task card",
+    "steps": [
+      "Move task-card rendering into a custom UIView with a complete configuration value.",
+      "Emit a toggle or edit intent and let the controller decide the resulting action.",
+      "Exercise empty notes, long text, and both completion states on the same instance.",
+      "Introduce a small set of semantic style tokens and ensure nonessential animation respects Reduce Motion."
+    ]
+  }
+}

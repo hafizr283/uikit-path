@@ -1,0 +1,232 @@
+{
+  "day": 9,
+  "title": "Collection views and compositional layouts",
+  "subtitle": "Turn one task model into flexible lists, grids, and sectioned interfaces.",
+  "phase": "Build",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Describe the roles of collection-view layout, registration, and data source.",
+    "Build adaptive sections using compositional layout.",
+    "Configure reusable cells with cell registrations and stable identifiers.",
+    "Update presentation without losing model identity or creating duplicate items."
+  ],
+  "prerequisites": [
+    "Day 8: reusable cells and diffable snapshots.",
+    "Day 4: layout priorities, safe areas, and adaptive sizing."
+  ],
+  "sections": [
+    {
+      "title": "1. Choose the layout for the information",
+      "body": [
+        "UICollectionView separates the arrangement of items from their content. The same data can become a vertical list, a two-column task board, or a screen of horizontally scrolling sections. Use a table when a straightforward vertical list meets the need; use a collection when section geometry or richer arrangements improve scanning. More layout flexibility also means more edge cases to test.",
+        "Flow layout is useful for simple wrapping grids with similar item sizes. Compositional layout describes items inside groups inside sections. A section provider can choose a layout from the section index and layout environment. A collection-view list configuration is another strong option for list-shaped interfaces that also need collection-view capabilities. Choose one intentionally rather than mixing unfamiliar layout mechanisms at random."
+      ]
+    },
+    {
+      "title": "2. Think in items, groups, and sections",
+      "body": [
+        "A layout item represents one cell's dimensions. A group arranges one or more items; its dimensions describe the repeated unit in a section. A section adds outer insets, spacing, supplementary elements, and optional orthogonal scrolling. Fractional dimensions are relative to the containing group or container, absolute dimensions are fixed points, and estimated dimensions permit the content to influence the final size.",
+        "For an adaptive board, inspect environment.container.effectiveContentSize.width. Choose a column count and construct a horizontal group that fills the available width. Avoid reading UIScreen.main.bounds: your collection may occupy a split view, a resizable window, or a smaller container. The effective collection-container width describes the space actually available to your layout."
+      ]
+    },
+    {
+      "title": "3. Register once, configure repeatedly",
+      "body": [
+        "Cell registrations bundle a cell type with its configuration handler. Create each registration once, typically during viewDidLoad, and reuse it in the data-source provider. Creating a registration inside the provider gives UIKit a fresh registration identity repeatedly and defeats the intended reuse arrangement. Configure all model-dependent properties in the handler just as you did for table cells.",
+        "A UICollectionViewCell can use UIListContentConfiguration for convenient labels and images, or a custom content view for a richer card. UIBackgroundConfiguration controls the background independently. Supplementary registrations provide headers and footers; the layout must request their element kind and the data source must supply a compatible view. A header is not an ordinary item in your task model."
+      ]
+    },
+    {
+      "title": "4. Snapshot changes and cell changes are different",
+      "body": [
+        "Use a diffable snapshot to describe ordered sections and the identifiers in each section. Identifiers must be unique across the whole snapshot, not just inside a section. If the same task appears in two different sections simultaneously, introduce a separate presentation identifier that includes the placement, while preserving the underlying task ID for business operations.",
+        "A changed task title, completion badge, or favorite flag usually needs reconfigureItems for the existing identifier. Moving a task from Today to Later changes its placement and needs a new or edited snapshot. Resolve selection through itemIdentifier(for:) rather than assuming that your model array still matches a captured index path after filtering or updates."
+      ]
+    },
+    {
+      "title": "5. Adaptivity is a behavior to test",
+      "body": [
+        "Test the collection in a narrow phone width, landscape, iPad split view, and large Dynamic Type sizes. A layout can be mathematically valid yet unusable if cards are too narrow to read. Prefer fewer columns and sufficient vertical growth over forcing dense content into a fixed-height tile. Decorative cards can have fixed heights; meaningful variable-length text often requires estimated sizing and complete constraints.",
+        "For images, show a placeholder immediately, cache prepared results, and ensure an old request cannot overwrite a reused cell. Prefetching can reduce waiting but does not replace identity checks or cancellation. When a section scrolls orthogonally, verify that horizontal gestures feel deliberate and that VoiceOver users can discover all its content. Performance and accessibility are part of a correct layout, not separate visual polish."
+      ]
+    }
+  ],
+  "example": {
+    "title": "An adaptive PocketTasks board",
+    "filename": "TaskBoardViewController.swift",
+    "code": "import UIKit\n\n@MainActor\nfinal class TaskBoardViewController: UIViewController {\n    private enum Section: Hashable { case main }\n    private let names = [\n        UUID(): \"Design the task card\",\n        UUID(): \"Handle empty content\",\n        UUID(): \"Test a narrow layout\",\n        UUID(): \"Review cell reuse\"\n    ]\n    private var source: UICollectionViewDiffableDataSource<Section, UUID>!\n\n    override func viewDidLoad() {\n        super.viewDidLoad()\n        title = \"Task board\"\n        view.backgroundColor = .systemBackground\n\n        let layout = UICollectionViewCompositionalLayout { _, environment in\n            let columns = environment.container.effectiveContentSize.width > 600 ? 3 : 2\n            let item = NSCollectionLayoutItem(layoutSize: .init(\n                widthDimension: .fractionalWidth(1),\n                heightDimension: .fractionalHeight(1)\n            ))\n            let group = NSCollectionLayoutGroup.horizontal(\n                layoutSize: .init(\n                    widthDimension: .fractionalWidth(1),\n                    heightDimension: .absolute(132)\n                ),\n                repeatingSubitem: item,\n                count: columns\n            )\n            group.interItemSpacing = .fixed(12)\n            let section = NSCollectionLayoutSection(group: group)\n            section.interGroupSpacing = 12\n            section.contentInsets = .init(top: 16, leading: 16, bottom: 16, trailing: 16)\n            return section\n        }\n\n        let collection = UICollectionView(frame: .zero, collectionViewLayout: layout)\n        collection.translatesAutoresizingMaskIntoConstraints = false\n        collection.backgroundColor = .systemBackground\n        view.addSubview(collection)\n        NSLayoutConstraint.activate([\n            collection.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),\n            collection.leadingAnchor.constraint(equalTo: view.leadingAnchor),\n            collection.trailingAnchor.constraint(equalTo: view.trailingAnchor),\n            collection.bottomAnchor.constraint(equalTo: view.bottomAnchor)\n        ])\n\n        let registration = UICollectionView.CellRegistration<UICollectionViewCell, UUID> {\n            [weak self] cell, _, id in\n            var content = UIListContentConfiguration.cell()\n            content.text = self?.names[id]\n            content.textProperties.numberOfLines = 3\n            content.image = UIImage(systemName: \"checklist\")\n            cell.contentConfiguration = content\n            var background = UIBackgroundConfiguration.clear()\n            background.backgroundColor = .secondarySystemBackground\n            background.cornerRadius = 14\n            cell.backgroundConfiguration = background\n        }\n\n        source = UICollectionViewDiffableDataSource(\n            collectionView: collection\n        ) { collection, indexPath, id in\n            collection.dequeueConfiguredReusableCell(\n                using: registration, for: indexPath, item: id\n            )\n        }\n        var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()\n        snapshot.appendSections([.main])\n        let ids = names.keys.sorted { names[$0, default: \"\"] < names[$1, default: \"\"] }\n        snapshot.appendItems(ids)\n        source.apply(snapshot, animatingDifferences: false)\n    }\n}",
+    "walkthrough": [
+      "Add this file to an iOS UIKit app and present TaskBoardViewController in a navigation controller. It is independent of Day 8's example and uses a small local dictionary as its data source.",
+      "The layout provider uses the collection container's effective width to switch between two and three columns. The sample uses a fixed card height to keep the initial geometry easy to inspect.",
+      "The item fills the slot assigned by the horizontal repeating group. The group manages the requested number of columns and the spacing between them.",
+      "Registration is created once and captured by the data-source provider. The registration itself captures the controller weakly.",
+      "The sorted identifiers make initial ordering deterministic. A dictionary's iteration order should not be used as the user-facing task order.",
+      "This fixed-height, three-line card is a layout demonstration. Use the adaptive list exercise or a self-sizing custom cell before displaying unrestricted user-entered text."
+    ],
+    "expectedOutput": "Four rounded task cards appear in two columns on a narrow container and three columns when the available width exceeds 600 points."
+  },
+  "exercises": [
+    {
+      "id": "d09-warmup",
+      "title": "Find the registration-lifetime bug",
+      "difficulty": "Warm-up",
+      "prompt": "A cell provider constructs a new CellRegistration every time it needs a cell. Move registration creation outside the provider and explain which closure should capture the owner weakly.",
+      "requirements": [
+        "Create one registration for the cell type.",
+        "Use the existing names dictionary and source property in TaskBoardViewController.",
+        "Configure the title for each requested identifier."
+      ],
+      "starterCode": "// Replace the provider setup in viewDidLoad.\n// The registration must not be created inside the provider.\nsource = UICollectionViewDiffableDataSource(collectionView: collection) {\n    collection, indexPath, id in\n    return nil\n}",
+      "hints": [
+        "The provider can retain an already-created registration.",
+        "The registration needs self only to read the model dictionary."
+      ],
+      "solution": "let registration = UICollectionView.CellRegistration<UICollectionViewCell, UUID> {\n    [weak self] cell, _, id in\n    var content = UIListContentConfiguration.cell()\n    content.text = self?.names[id]\n    cell.contentConfiguration = content\n}\nsource = UICollectionViewDiffableDataSource(collectionView: collection) {\n    collection, indexPath, id in\n    collection.dequeueConfiguredReusableCell(\n        using: registration, for: indexPath, item: id\n    )\n}",
+      "explanation": "The data source retains its provider, which retains the registration. A strong capture of the controller inside that registration could complete an ownership cycle because the controller owns the data source. One weak capture breaks that cycle while maintaining one reusable registration identity.",
+      "checks": [
+        "Scroll a larger dataset repeatedly without registration-related errors.",
+        "Navigate away and use Memory Graph to confirm the controller can be released."
+      ]
+    },
+    {
+      "id": "d09-core",
+      "title": "Switch to a readable list for accessibility sizes",
+      "difficulty": "Core",
+      "prompt": "Replace the layout provider with one that uses a self-sizing collection list whenever the preferred content size category is an accessibility category. Keep a two-column grid for normal categories.",
+      "requirements": [
+        "Read the trait collection from the layout environment.",
+        "Use UICollectionLayoutListConfiguration for the accessibility layout.",
+        "Return a valid section in both branches."
+      ],
+      "starterCode": "let layout = UICollectionViewCompositionalLayout { _, environment in\n    // Choose list or grid.\n    return nil\n}",
+      "hints": [
+        "UIContentSizeCategory has isAccessibilityCategory.",
+        "NSCollectionLayoutSection.list(using:layoutEnvironment:) builds a list section."
+      ],
+      "solution": "let layout = UICollectionViewCompositionalLayout { _, environment in\n    if environment.traitCollection.preferredContentSizeCategory.isAccessibilityCategory {\n        let config = UICollectionLayoutListConfiguration(appearance: .plain)\n        return NSCollectionLayoutSection.list(\n            using: config, layoutEnvironment: environment\n        )\n    }\n    let item = NSCollectionLayoutItem(layoutSize: .init(\n        widthDimension: .fractionalWidth(1),\n        heightDimension: .fractionalHeight(1)\n    ))\n    let group = NSCollectionLayoutGroup.horizontal(\n        layoutSize: .init(\n            widthDimension: .fractionalWidth(1),\n            heightDimension: .absolute(132)\n        ),\n        repeatingSubitem: item,\n        count: 2\n    )\n    group.interItemSpacing = .fixed(12)\n    let section = NSCollectionLayoutSection(group: group)\n    section.interGroupSpacing = 12\n    section.contentInsets = .init(top: 16, leading: 16, bottom: 16, trailing: 16)\n    return section\n}",
+      "explanation": "Adaptive design can change the structure, not merely shrink text. For this exercise also set content.textProperties.numberOfLines = 0 in the registration so list rows can show all the text. Built-in content configuration supports Dynamic Type; verify the entire screen instead of assuming one API guarantees accessibility.",
+      "checks": [
+        "At a normal text size, see two columns.",
+        "At an accessibility text size, see a vertical list with readable wrapped titles.",
+        "Rotate and change text size again without losing task identities."
+      ]
+    },
+    {
+      "id": "d09-stretch",
+      "title": "Show one task in two distinct placements",
+      "difficulty": "Stretch",
+      "prompt": "Design identifiers for a task that appears in both Pinned and All sections. Build a snapshot without using the same item identifier twice.",
+      "requirements": [
+        "Preserve a shared underlying task UUID.",
+        "Use a unique presentation identifier for each section placement.",
+        "Explain how selection resolves back to the task."
+      ],
+      "starterCode": "enum BoardSection: Hashable { case pinned, all }\nstruct Placement: Hashable {\n    // Add identity components.\n}",
+      "hints": [
+        "Synthesized Hashable can combine section and task ID.",
+        "Business operations use taskID; the collection diff uses the full placement."
+      ],
+      "solution": "enum BoardSection: Hashable { case pinned, all }\n\nstruct Placement: Hashable {\n    let section: BoardSection\n    let taskID: UUID\n}\n\nfunc makeSnapshot(taskID: UUID)\n    -> NSDiffableDataSourceSnapshot<BoardSection, Placement> {\n    var snapshot = NSDiffableDataSourceSnapshot<BoardSection, Placement>()\n    snapshot.appendSections([.pinned, .all])\n    snapshot.appendItems(\n        [Placement(section: .pinned, taskID: taskID)], toSection: .pinned\n    )\n    snapshot.appendItems(\n        [Placement(section: .all, taskID: taskID)], toSection: .all\n    )\n    return snapshot\n}",
+      "explanation": "The two placements are different presentation items even though they refer to one domain entity. Change the collection data source's item type to Placement when integrating this design. On selection, resolve the placement and use its taskID to find or mutate the task. Reconfigure both placements after a shared model change.",
+      "checks": [
+        "The snapshot contains two distinct identifiers with the same taskID.",
+        "Toggling the underlying task updates both visible placements.",
+        "Removing the Pinned placement leaves the All placement intact."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "Which size describes the space available to a compositional layout most accurately?",
+      "options": [
+        "UIScreen.main.bounds in every situation",
+        "The layout environment's effective container size",
+        "A hardcoded phone width",
+        "The app icon dimensions"
+      ],
+      "answer": 1,
+      "explanation": "The collection may live inside a smaller or resizable container. The environment describes its actual available layout space."
+    },
+    {
+      "question": "When should you create a CellRegistration?",
+      "options": [
+        "Every time the provider is called",
+        "Once for reuse, such as during setup",
+        "Only after a cell scrolls offscreen",
+        "Only inside prepareForReuse"
+      ],
+      "answer": 1,
+      "explanation": "Registration carries reusable cell configuration and identity. Constructing it repeatedly inside the provider defeats that lifecycle."
+    },
+    {
+      "question": "Can the same diffable item identifier appear once in each of two sections?",
+      "options": [
+        "Yes, sections isolate item identity",
+        "Yes, if the cells look different",
+        "No, item identifiers must be unique in the snapshot",
+        "Only when animations are disabled"
+      ],
+      "answer": 2,
+      "explanation": "Identifiers are globally unique within a snapshot. Use distinct presentation placements when one domain model appears more than once."
+    },
+    {
+      "question": "Which relationship is correct in compositional layout?",
+      "options": [
+        "A cell contains a section that contains a group",
+        "Items form groups, and groups form a section's arrangement",
+        "A section must contain exactly one visible item",
+        "Every group must scroll horizontally"
+      ],
+      "answer": 1,
+      "explanation": "Items define cell slots, groups arrange slots, and sections repeat and decorate groups. Orthogonal scrolling is an optional section behavior."
+    },
+    {
+      "question": "Why might a layout change from a grid to a list at large text sizes?",
+      "options": [
+        "To keep the same fixed height by clipping",
+        "Because collection views cannot show large text",
+        "To provide enough readable width and vertical space",
+        "To change model UUIDs"
+      ],
+      "answer": 2,
+      "explanation": "Accessibility may require structural adaptation. Preserving readable content is more valuable than forcing an unchanged column count."
+    }
+  ],
+  "pitfalls": [
+    "Creating registrations inside the diffable provider.",
+    "Using the same item identifier twice in one snapshot.",
+    "Deriving layout width from the whole screen rather than the actual container.",
+    "Giving variable-length text a rigid height with no accessible alternative.",
+    "Forgetting to provide a supplementary view requested by the layout."
+  ],
+  "checkpoint": [
+    "Explain item, group, and section with your own board as the example.",
+    "Demonstrate a layout change at a wider container size.",
+    "Keep identity stable while updating a card title.",
+    "Explain the ownership chain through data source, provider, and registration.",
+    "Test a large accessibility text size and a narrow container."
+  ],
+  "references": [
+    {
+      "title": "UICollectionView",
+      "url": "https://developer.apple.com/documentation/uikit/uicollectionview"
+    },
+    {
+      "title": "UICollectionViewCompositionalLayout",
+      "url": "https://developer.apple.com/documentation/uikit/uicollectionviewcompositionallayout"
+    },
+    {
+      "title": "UICollectionView.CellRegistration",
+      "url": "https://developer.apple.com/documentation/uikit/uicollectionview/cellregistration"
+    }
+  ],
+  "capstone": {
+    "title": "PocketTasks milestone: an adaptive board",
+    "steps": [
+      "Add a board screen using the same stable task identifiers as the inbox.",
+      "Group tasks into meaningful sections such as Today and Later.",
+      "Make large-text layouts readable and document when you choose a list instead of a grid.",
+      "Keep task mutation in the model so both list and board reflect the same values."
+    ]
+  }
+}

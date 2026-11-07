@@ -1,0 +1,234 @@
+{
+  "day": 17,
+  "title": "Debugging, performance & reliability",
+  "subtitle": "Turn symptoms into evidence, then verify the fix.",
+  "phase": "Ship with confidence",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Reproduce a defect and inspect the relevant stack, state, and ownership.",
+    "Use breakpoints, LLDB, View Debugger, and Memory Graph deliberately.",
+    "Profile CPU, allocations, leaks, and main-thread stalls on representative workloads.",
+    "Distinguish a correctness fix from an unmeasured performance guess."
+  ],
+  "prerequisites": [
+    "Day 2: ARC, capture lists, and retain cycles.",
+    "Day 4: Auto Layout constraints and priorities.",
+    "Day 10: MainActor and asynchronous work.",
+    "Day 16: regression tests and deterministic fixtures."
+  ],
+  "sections": [
+    {
+      "title": "1. Make a reproducible debugging story",
+      "body": [
+        "Start with a concrete report: expected behavior, observed behavior, exact steps, build, device, OS, and relevant fixture data. 'Sometimes slow' is difficult to investigate; 'opening the 2,000-task list after a cold launch freezes scrolling for one second' gives you a workload. Reduce the steps while preserving the failure, and write down what you know separately from your theory.",
+        "Read the first useful error and the complete stack rather than changing code until the symptom disappears. A crash at an array access may originate in a stale response that replaced the backing data earlier. Symbolicated stacks connect addresses to your source; preserve the matching archive and dSYM files for release investigations. A successful fix should explain the cause, prevent the defect, and survive the original reproduction steps."
+      ]
+    },
+    {
+      "title": "2. Ask focused questions with debugger tools",
+      "body": [
+        "Use a breakpoint where a wrong value first becomes observable. In LLDB, po inspects an object's description, p evaluates an expression, and bt shows the current thread's backtrace. Be careful: expressions can execute code and descriptions can contain sensitive data. Prefer narrow inspection over dumping an entire authenticated request. Conditional breakpoints and breakpoint actions help isolate one item without repeatedly stopping for every cell.",
+        "Enable an exception breakpoint when diagnosing Objective-C exceptions such as invalid UIKit operations. Swift runtime traps and thrown Swift errors are different events; use the appropriate runtime or Swift error breakpoint as needed. The View Debugger reveals hidden, misplaced, clipped, and unexpectedly overlapping views. For an Auto Layout warning, identify the conflicting constraints and missing relationship instead of randomly lowering priorities until the log becomes quiet."
+      ]
+    },
+    {
+      "title": "3. Follow ownership with Memory Graph",
+      "body": [
+        "If a controller remains alive after you pop it, inspect the object graph. Look for an ownership path from a long-lived object or a cycle within the supposedly released group. Common paths include stored closures, timers, observers, delegates that should be weak, and tasks that remain active. A closure capture list is a decision about ownership, not a decoration to paste onto every closure.",
+        "The example below has a controller-owned callback that captures the controller weakly. Removing weak creates controller → callback → controller. The button's UIAction is another retained closure and needs the same ownership consideration. Memory Graph helps explain who retains the controller; Instruments Allocations helps determine whether repeated navigation makes memory grow. A high memory reading alone is not proof of a leak because caches and allocator behavior also retain memory intentionally."
+      ]
+    },
+    {
+      "title": "4. Measure main-thread work and scrolling",
+      "body": [
+        "UIKit rendering belongs on the main thread, but that does not mean JSON parsing, large sorts, database scans, and image decompression belong there. Use Time Profiler to identify expensive stacks, then use Instruments' responsiveness tools to investigate hangs. An async function does not inherently move CPU-heavy work off MainActor. A task created from an actor-isolated context can inherit that actor's isolation.",
+        "For list performance, inspect repeated work: formatting the same date for every layout pass, decoding full-resolution photos for tiny cells, rebuilding all models after one change, or doing synchronous disk access during cell configuration. Cache with an explicit identity, bound memory usage, downsample images to the display need, and cancel obsolete work. First establish that your data and reuse behavior are correct; a fast cell that shows another task's image is still defective."
+      ]
+    },
+    {
+      "title": "5. Verify improvements under realistic conditions",
+      "body": [
+        "Debug builds and the debugger change timing, so measure performance using an appropriate optimized build and representative device when possible. The simulator is valuable for iteration but does not reproduce every device constraint. Repeat the same workload and compare distributions rather than celebrating one unusually fast run. Keep correctness checks alongside a performance change so an optimization cannot silently alter ordering or drop data.",
+        "Use structured logging with a subsystem and category, and mark private values appropriately. Do not collect tokens, passwords, complete user documents, or unnecessary personal content. For production crashes, connect the issue to a release, symbolize it, reproduce if possible, and track the fix. Document what you measured, what changed, and which conditions remain untested. 'No longer crashes in my one attempt' is a weaker conclusion than a regression test plus the original device reproduction."
+      ]
+    }
+  ],
+  "example": {
+    "title": "Inspect a controller's lifetime",
+    "filename": "LifetimeViewController.swift",
+    "code": "import UIKit\n\n@MainActor\nfinal class LifetimeViewController: UIViewController {\n    private let statusLabel = UILabel()\n    private var refresh: (() -> Void)?\n    private var refreshCount = 0\n\n    override func viewDidLoad() {\n        super.viewDidLoad()\n        title = \"Lifetime lab\"\n        view.backgroundColor = .systemBackground\n\n        statusLabel.text = \"Refresh count: 0\"\n        statusLabel.font = .preferredFont(forTextStyle: .body)\n        statusLabel.adjustsFontForContentSizeCategory = true\n\n        refresh = { [weak self] in\n            guard let self else { return }\n            self.refreshCount += 1\n            self.statusLabel.text =\n                \"Refresh count: \\(self.refreshCount)\"\n        }\n\n        var configuration = UIButton.Configuration.filled()\n        configuration.title = \"Refresh\"\n        let button = UIButton(configuration: configuration)\n        button.addAction(UIAction { [weak self] _ in\n            self?.refresh?()\n        }, for: .touchUpInside)\n\n        let stack = UIStackView(arrangedSubviews: [\n            statusLabel, button\n        ])\n        stack.axis = .vertical\n        stack.spacing = 16\n        stack.translatesAutoresizingMaskIntoConstraints = false\n        view.addSubview(stack)\n        NSLayoutConstraint.activate([\n            stack.leadingAnchor.constraint(\n                equalTo: view.safeAreaLayoutGuide.leadingAnchor,\n                constant: 24\n            ),\n            stack.trailingAnchor.constraint(\n                equalTo: view.safeAreaLayoutGuide.trailingAnchor,\n                constant: -24\n            ),\n            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor)\n        ])\n    }\n\n    deinit {\n        print(\"LifetimeViewController released\")\n    }\n}",
+    "walkthrough": [
+      "Add this file to the iOS app target. From an existing controller inside a UINavigationController, push LifetimeViewController(). It needs no storyboard.",
+      "Tap Refresh and confirm that the visible count increases. Pop the controller and look for the deinit message, which contains no user data.",
+      "Place a breakpoint in viewDidLoad and inspect the view hierarchy after layout using Xcode's View Debugger.",
+      "For a deliberate local leak experiment, temporarily make the refresh closure capture self strongly. Push and pop again, then find the retained controller and closure in Memory Graph. Revert the change after observing it.",
+      "The weak capture breaks this particular cycle. A missing deinit message alone does not identify a cause; transitions, navigation stacks, caches, or other owners may still legitimately retain a controller."
+    ],
+    "expectedOutput": "The count increases when tapped. Once the controller is popped and its transition completes, it is released if no other owner retains it."
+  },
+  "exercises": [
+    {
+      "id": "17-warmup",
+      "title": "Replace an unsafe index assumption",
+      "difficulty": "Warm-up",
+      "prompt": "A detail screen crashes when a saved index becomes invalid after a refreshed list shrinks. Write a safe accessor and explain why production navigation should prefer a stable task identifier.",
+      "requirements": [
+        "Handle negative and out-of-range indices.",
+        "Return an optional instead of substituting an unrelated item.",
+        "Test empty and nonempty arrays."
+      ],
+      "starterCode": "func element<T>(at index: Int, in values: [T]) -> T? {\n    // Validate membership in the array's valid indices.\n    nil\n}",
+      "hints": [
+        "An Array's indices range supports contains(_:).",
+        "Do not use values.count - 1 when the array can be empty."
+      ],
+      "solution": "func element<T>(at index: Int, in values: [T]) -> T? {\n    guard values.indices.contains(index) else { return nil }\n    return values[index]\n}\n\n// Expected results:\n// element(at: -1, in: [10, 20]) == nil\n// element(at: 1, in: [10, 20]) == 20\n// element(at: 2, in: [10, 20]) == nil\n// element(at: 0, in: [Int]()) == nil",
+      "explanation": "Bounds validation stops the trap, but an index can remain valid while pointing to a different item after sorting or deletion. Store and look up a stable task ID when preserving navigation across list changes.",
+      "checks": [
+        "Negative, empty, and past-the-end accesses return nil.",
+        "A valid index returns its element.",
+        "Explain a case where a valid old index selects the wrong task."
+      ]
+    },
+    {
+      "id": "17-core",
+      "title": "Prove that a stored callback does not leak",
+      "difficulty": "Core",
+      "prompt": "A tiny editor owns an onSave closure that reads its title. Fix its ownership and add a test that the editor becomes nil after its last external strong reference is removed.",
+      "requirements": [
+        "Use a weak reference for the test observation.",
+        "Retain the callback on the editor to model the ownership risk.",
+        "Avoid involving UIKit so the ownership rule is clear."
+      ],
+      "starterCode": "final class Editor {\n    var title = \"Draft\"\n    var onSave: (() -> String)?\n    init() {\n        onSave = { self.title }\n    }\n}",
+      "hints": [
+        "The cycle is Editor → closure → Editor.",
+        "Capture self weakly and decide what the callback returns if the editor is gone."
+      ],
+      "solution": "import XCTest\n\nprivate final class Editor {\n    var title = \"Draft\"\n    var onSave: (() -> String)?\n\n    init() {\n        onSave = { [weak self] in\n            self?.title ?? \"\"\n        }\n    }\n}\n\nfinal class EditorLifetimeTests: XCTestCase {\n    func testEditorIsReleased() {\n        var editor: Editor? = Editor()\n        weak var observed = editor\n        XCTAssertEqual(editor?.onSave?(), \"Draft\")\n        editor = nil\n        XCTAssertNil(observed)\n    }\n}",
+      "explanation": "The test watches the object without owning it. Returning an empty string is only this fixture's fallback; a real callback may be better modeled as an optional result or a no-op. Unowned would require a stronger lifetime guarantee than this stored callback provides.",
+      "checks": [
+        "The weak observation becomes nil.",
+        "Reintroducing a strong capture makes the test fail.",
+        "You can draw the retaining edges before and after the fix."
+      ]
+    },
+    {
+      "id": "17-stretch",
+      "title": "Remove repeated membership scans without changing behavior",
+      "difficulty": "Stretch",
+      "prompt": "A list filters 20,000 tasks by thousands of selected IDs. Its implementation calls selectedIDs.contains inside every filter iteration. Replace repeated linear scans, preserve source order, and benchmark a fixed fixture.",
+      "requirements": [
+        "Return exactly the same items in the same order.",
+        "Build the membership structure once per operation.",
+        "Use XCTest measure for a repeatable local comparison; do not assert a universal millisecond limit."
+      ],
+      "starterCode": "struct Item: Equatable {\n    let id: Int\n}\nfunc selectedItems(_ items: [Item], ids: [Int]) -> [Item] {\n    items.filter { ids.contains($0.id) }\n}",
+      "hints": [
+        "A Set provides average constant-time membership checks.",
+        "Filtering the original array preserves its order; iterating the Set does not."
+      ],
+      "solution": "import XCTest\n\nprivate struct Item: Equatable {\n    let id: Int\n}\n\nprivate func selectedItems(\n    _ items: [Item], ids: [Int]\n) -> [Item] {\n    let membership = Set(ids)\n    return items.filter { membership.contains($0.id) }\n}\n\nfinal class SelectionPerformanceTests: XCTestCase {\n    func testPreservesSourceOrderAndMembership() {\n        let items = [Item(id: 3), Item(id: 1), Item(id: 2)]\n        XCTAssertEqual(\n            selectedItems(items, ids: [2, 3, 3]),\n            [Item(id: 3), Item(id: 2)]\n        )\n    }\n\n    func testSelectionPerformance() {\n        let items = (0..<20_000).map { Item(id: $0) }\n        let ids = Array(stride(from: 0, to: 20_000, by: 2))\n        measure {\n            let result = selectedItems(items, ids: ids)\n            XCTAssertEqual(result.count, 10_000)\n        }\n    }\n}",
+      "explanation": "The original work is roughly proportional to items multiplied by selected IDs. Building a Set then filtering is roughly proportional to their sum on average, with extra memory for the Set. Measure both versions under the same optimized configuration and workload rather than promising a device-independent speedup.",
+      "checks": [
+        "Duplicate selected IDs do not duplicate output items.",
+        "Output preserves the source array's order.",
+        "Record the workload, build configuration, and measured before/after values."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "A controller remains alive after being popped. Which tool best reveals retaining relationships?",
+      "options": [
+        "Asset Catalog",
+        "Memory Graph",
+        "App Store Connect pricing",
+        "Localization export"
+      ],
+      "answer": 1,
+      "explanation": "Memory Graph shows object references and helps locate ownership paths or cycles."
+    },
+    {
+      "question": "Does making a function async guarantee its CPU-heavy work runs off MainActor?",
+      "options": [
+        "Yes, always",
+        "Only on Wi-Fi",
+        "No; isolation and execution context still matter",
+        "Only if the function returns Void"
+      ],
+      "answer": 2,
+      "explanation": "Async permits suspension. It is not a guarantee that synchronous work inside the function runs away from the UI actor."
+    },
+    {
+      "question": "What makes a performance comparison credible?",
+      "options": [
+        "Different workloads on different devices",
+        "One fast debug run",
+        "Matching workloads and build conditions with repeated measurements",
+        "Removing assertions until timing improves"
+      ],
+      "answer": 2,
+      "explanation": "Control the conditions and retain correctness checks so the result is meaningful."
+    },
+    {
+      "question": "Why can a valid saved array index still be wrong after refresh?",
+      "options": [
+        "Swift arrays cannot change",
+        "The same index may now refer to a different item",
+        "Only negative indices work after refresh",
+        "Auto Layout changes array order"
+      ],
+      "answer": 1,
+      "explanation": "Indices represent positions. Stable model IDs represent identity across insertions, deletions, and sorting."
+    },
+    {
+      "question": "Which log entry is most appropriate for a failed authenticated request?",
+      "options": [
+        "The full bearer token",
+        "The user's password",
+        "A safe operation name, status code, and correlation identifier",
+        "The entire private document body"
+      ],
+      "answer": 2,
+      "explanation": "Record the minimum operational evidence needed to investigate without leaking credentials or unnecessary personal data."
+    }
+  ],
+  "pitfalls": [
+    "An arbitrary weak capture may hide a missing owner rather than fix the intended lifetime.",
+    "A high memory footprint is not automatically a leak.",
+    "Profiling only in Debug can misrepresent release performance.",
+    "Moving UI mutations to a background queue creates new correctness defects.",
+    "A crash fix that merely suppresses the error can silently show wrong data."
+  ],
+  "checkpoint": [
+    "Capture reproducible steps and a useful stack for one deliberate defect.",
+    "Find a retained controller and identify the actual ownership path.",
+    "Use View Debugger to explain a layout issue.",
+    "Measure one optimization while preserving a correctness test.",
+    "Write a short before/after investigation note with remaining limits."
+  ],
+  "references": [
+    {
+      "title": "Apple: Diagnosing memory, thread, and crash issues early",
+      "url": "https://developer.apple.com/documentation/xcode/diagnosing-memory-thread-and-crash-issues-early"
+    },
+    {
+      "title": "Apple: Improving your app's performance",
+      "url": "https://developer.apple.com/documentation/xcode/improving-your-app-s-performance"
+    },
+    {
+      "title": "Apple: Logging",
+      "url": "https://developer.apple.com/documentation/os/logging"
+    }
+  ],
+  "capstone": {
+    "title": "Audit PocketTasks under a larger workload",
+    "steps": [
+      "Load a fixture of at least 2,000 tasks and repeat scrolling, opening details, and returning.",
+      "Verify that popped controllers are released and images do not grow memory without a bound.",
+      "Profile the slowest observed interaction and change only the measured bottleneck.",
+      "Keep a regression test and record the comparison conditions in a performance note."
+    ]
+  }
+}

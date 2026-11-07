@@ -1,0 +1,235 @@
+{
+  "day": 16,
+  "title": "Testing UIKit applications",
+  "subtitle": "Prove behavior with fast, deterministic tests.",
+  "phase": "Ship with confidence",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Separate testable behavior from UIKit rendering and infrastructure.",
+    "Use XCTest for pure functions, async services, and MainActor view models.",
+    "Choose a stub, mock, or fake based on the question under test.",
+    "Write focused UI tests for critical user journeys and error recovery."
+  ],
+  "prerequisites": [
+    "Day 10: async functions and actor isolation.",
+    "Day 11: API response validation and decoding.",
+    "Day 13: protocols and dependency injection."
+  ],
+  "sections": [
+    {
+      "title": "1. Test decisions at the lowest useful layer",
+      "body": [
+        "A useful test describes a behavior the product needs and fails when that behavior breaks. Start with decisions: whether a task title is valid, which state follows an empty response, and whether a retry replaces an error. These are easier to verify in small types than by launching the entire app. Keep a few UI tests for flows whose correctness depends on controls, navigation, keyboard behavior, or app integration.",
+        "Arrange the inputs and dependencies, act once, and assert the observable result. Avoid asserting private method names, exact internal call order without a requirement, or every line of implementation. A refactor that preserves behavior should normally preserve your tests. Name tests with a condition and expected result, such as testLoadEmptyResponseShowsEmptyState. When a test fails, its name and assertion should tell the next engineer what behavior changed."
+      ]
+    },
+    {
+      "title": "2. Use test doubles deliberately",
+      "body": [
+        "A stub returns a prepared value. A fake implements a lightweight working substitute, such as an in-memory task store. A mock records interaction when the interaction itself matters, such as ensuring one refresh occurs for simultaneous callers. These are roles, not frameworks you must install. A tiny Swift struct or actor is often enough.",
+        "Inject dependencies through an initializer and keep production defaults at the composition boundary. A view model that constructs URLSession.shared or reads global UserDefaults directly forces tests to share hidden state. Prefer separate UserDefaults suites, in-memory Core Data stores, temporary directories, and unique Keychain services. Clean them up even when a test fails. A test that works only after another test has run is exposing an unwanted dependency."
+      ]
+    },
+    {
+      "title": "3. Async tests need synchronization, not sleeps",
+      "body": [
+        "XCTest supports async test methods, so await the operation under test directly when it returns a value. Use expectations for callback-based APIs and fulfill them on the actual completion event. Do not sleep for a guessed number of milliseconds and assume a request has finished. That approach becomes flaky on a busy CI machine and needlessly slow on a fast one.",
+        "Keep MainActor-isolated view-model work on MainActor. Apply @MainActor to the relevant test method rather than weakening production isolation to make a test compile. A Sendable test stub should genuinely contain values safe to cross isolation boundaries. For race tests, use a controlled continuation or a small actor-based gate so the test decides when a response is released. Cancellation is a behavior to assert, not a failure to hide with try?."
+      ]
+    },
+    {
+      "title": "4. Control the network boundary",
+      "body": [
+        "Most unit tests should never need the public internet. Inject a service protocol to test view-model states, and test the API client separately using URLProtocol with an ephemeral URLSession. Return known bytes, a deliberate status code, or a transport error. Verify decoding and status handling independently; a JSON decoding error must not accidentally mask a missing HTTP validation step.",
+        "A common sample uses one mutable static URLProtocol handler. That shared global becomes a race when tests run in parallel and can conflict with Swift 6 concurrency checks. Prefer per-session or per-request fixture routing with synchronization if you need mutable state. The stretch exercise uses an immutable fixture protocol, avoiding a shared mutable handler entirely. Its fixed response is suitable for one client boundary test, not a general-purpose networking framework."
+      ]
+    },
+    {
+      "title": "5. Use UI tests where interaction matters",
+      "body": [
+        "XCUITest launches and drives your app through accessibility. Give important controls stable accessibilityIdentifier values such as task.titleField and task.saveButton; localized visible text should not be the only test selector. Launch the app with a documented argument that selects an in-memory fixture environment, so UI tests can exercise empty, loaded, and failed screens reproducibly without depending on a real account.",
+        "Wait for a specific element with waitForExistence(timeout:) and assert the visible result of an action. Cover a small set of valuable flows: create a task, reject an empty title, recover from an error, and navigate to details and back. Test visual adaptivity with accessibility settings and manual inspection as well. Passing unit tests does not prove that text is readable, VoiceOver order is sensible, or a button remains visible above the keyboard."
+      ]
+    }
+  ],
+  "example": {
+    "title": "An async view-model test suite",
+    "filename": "TaskListViewModelTests.swift",
+    "code": "import Foundation\nimport XCTest\n\n// Self-contained teaching types. Put this entire file in an iOS\n// Unit Testing target; no app module import is required.\nprivate struct TaskItem: Equatable, Sendable {\n    let id: Int\n    let title: String\n}\n\nprivate enum StubError: Error {\n    case offline\n}\n\nprivate protocol TaskLoading: Sendable {\n    func fetchTasks() async throws -> [TaskItem]\n}\n\nprivate struct StubLoader: TaskLoading {\n    let result: Result<[TaskItem], StubError>\n\n    func fetchTasks() async throws -> [TaskItem] {\n        try result.get()\n    }\n}\n\n@MainActor\nprivate final class TaskListViewModel {\n    enum State: Equatable {\n        case idle, loading, empty\n        case loaded([TaskItem])\n        case failed(String)\n    }\n\n    private(set) var state: State = .idle\n    private let loader: any TaskLoading\n\n    init(loader: any TaskLoading) {\n        self.loader = loader\n    }\n\n    func load() async {\n        state = .loading\n        do {\n            let items = try await loader.fetchTasks()\n            try Task.checkCancellation()\n            state = items.isEmpty ? .empty : .loaded(items)\n        } catch is CancellationError {\n            state = .idle\n        } catch {\n            state = .failed(\"Could not load tasks.\")\n        }\n    }\n}\n\nfinal class TaskListViewModelTests: XCTestCase {\n    @MainActor\n    func testLoadSuccessPublishesItems() async {\n        let items = [TaskItem(id: 1, title: \"Study UIKit\")]\n        let model = TaskListViewModel(\n            loader: StubLoader(result: .success(items))\n        )\n        await model.load()\n        let actual = model.state\n        XCTAssertEqual(actual, .loaded(items))\n    }\n\n    @MainActor\n    func testEmptyResponseShowsEmptyState() async {\n        let model = TaskListViewModel(\n            loader: StubLoader(result: .success([]))\n        )\n        await model.load()\n        let actual = model.state\n        XCTAssertEqual(actual, .empty)\n    }\n\n    @MainActor\n    func testFailureShowsRecoverableMessage() async {\n        let model = TaskListViewModel(\n            loader: StubLoader(result: .failure(.offline))\n        )\n        await model.load()\n        let actual = model.state\n        XCTAssertEqual(actual, .failed(\"Could not load tasks.\"))\n    }\n}",
+    "walkthrough": [
+      "In Xcode, add an iOS Unit Testing Bundle if the project has none. Add this file to that test target only, then use Product > Test.",
+      "The teaching types are private and self-contained. In your app, keep the real implementation in the app or a library target and use @testable import PocketTasks in tests instead of duplicating production code.",
+      "StubLoader is immutable and Sendable. Its result makes success, empty, and failure cases immediate and independent of a server.",
+      "Only test methods that touch the MainActor view model are annotated. Each assertion compares a local snapshot of observable state.",
+      "This small model assumes one load at a time. A real searchable list also needs stale-request protection and tests for out-of-order responses from Day 12."
+    ],
+    "expectedOutput": "Three tests pass in an iOS test destination. A change that stops mapping an empty result to .empty should fail the empty-state test."
+  },
+  "exercises": [
+    {
+      "id": "16-warmup",
+      "title": "Test title validation at its boundaries",
+      "difficulty": "Warm-up",
+      "prompt": "Write tests for a title normalizer that trims whitespace, rejects empty titles, and accepts titles with at most 80 characters after trimming.",
+      "requirements": [
+        "Test whitespace-only input, exactly 80 characters, and 81 characters.",
+        "Check the returned normalized value.",
+        "Avoid relying on test execution order."
+      ],
+      "starterCode": "import Foundation\nfunc normalizedTitle(_ input: String) -> String? {\n    let value = input.trimmingCharacters(in: .whitespacesAndNewlines)\n    guard !value.isEmpty, value.count <= 80 else { return nil }\n    return value\n}\n// Add XCTest assertions for the boundaries.",
+      "hints": [
+        "String(repeating:count:) creates exact boundary inputs.",
+        "Swift String.count counts characters, not UTF-8 bytes."
+      ],
+      "solution": "import Foundation\nimport XCTest\n\nprivate func normalizedTitle(_ input: String) -> String? {\n    let value = input.trimmingCharacters(in: .whitespacesAndNewlines)\n    guard !value.isEmpty, value.count <= 80 else { return nil }\n    return value\n}\n\nfinal class TitleValidationTests: XCTestCase {\n    func testTrimsBeforeValidation() {\n        XCTAssertEqual(normalizedTitle(\"  Read docs\\n\"), \"Read docs\")\n    }\n\n    func testWhitespaceIsRejected() {\n        XCTAssertNil(normalizedTitle(\" \\n\\t \"))\n    }\n\n    func testMaximumBoundary() {\n        let accepted = String(repeating: \"a\", count: 80)\n        XCTAssertEqual(normalizedTitle(accepted), accepted)\n        XCTAssertNil(normalizedTitle(accepted + \"a\"))\n    }\n}",
+      "explanation": "Boundary tests are more valuable than repeating many ordinary inputs. The contract here uses user-perceived characters; if a backend limits bytes, define and test a matching contract rather than assuming the two are equivalent.",
+      "checks": [
+        "Changing <= 80 to < 80 breaks the boundary test.",
+        "Removing trimming breaks the normalization test.",
+        "No test reads a global clock, network, or shared store."
+      ]
+    },
+    {
+      "id": "16-core",
+      "title": "Prove recovery after an initial failure",
+      "difficulty": "Core",
+      "prompt": "Using the teaching types from the example, provide an actor-based loader that fails once, then succeeds. Test that calling load again replaces the error with loaded content.",
+      "requirements": [
+        "Make the loader state safe for async calls.",
+        "Assert the first failure and the successful retry separately.",
+        "Do not use sleep or a real network request."
+      ],
+      "starterCode": "// Add this exercise to TaskListViewModelTests.swift.\nprivate actor RetryLoader: TaskLoading {\n    func fetchTasks() async throws -> [TaskItem] {\n        // Fail once, then return a fixture.\n        []\n    }\n}",
+      "hints": [
+        "An actor can keep a private call counter.",
+        "An async method can satisfy the TaskLoading protocol."
+      ],
+      "solution": "// Add to the same test file as the example.\nprivate actor RetryLoader: TaskLoading {\n    private var calls = 0\n    func fetchTasks() async throws -> [TaskItem] {\n        calls += 1\n        if calls == 1 { throw StubError.offline }\n        return [TaskItem(id: 2, title: \"Retry succeeded\")]\n    }\n}\n\nextension TaskListViewModelTests {\n    @MainActor\n    func testRetryReplacesFailureWithContent() async {\n        let model = TaskListViewModel(loader: RetryLoader())\n        await model.load()\n        let first = model.state\n        XCTAssertEqual(first, .failed(\"Could not load tasks.\"))\n\n        await model.load()\n        let second = model.state\n        XCTAssertEqual(\n            second,\n            .loaded([TaskItem(id: 2, title: \"Retry succeeded\")])\n        )\n    }\n}",
+      "explanation": "This fake models an important temporal behavior with a controlled sequence. It verifies that failure does not permanently trap the model. It does not prove the retry button is wired correctly; a separate UI test covers that connection.",
+      "checks": [
+        "The first load publishes an error.",
+        "The second load publishes the fixture item.",
+        "The test remains independent of connection speed and server availability."
+      ]
+    },
+    {
+      "id": "16-stretch",
+      "title": "Test a URLSession boundary without the internet",
+      "difficulty": "Stretch",
+      "prompt": "Use an immutable URLProtocol fixture to deliver a known HTTP response. Verify that an ephemeral session receives the exact bytes and status code.",
+      "requirements": [
+        "Intercept only requests to fixture.test.",
+        "Do not introduce a mutable static handler.",
+        "Invalidate the URLSession at the end.",
+        "Keep the test in the test target."
+      ],
+      "starterCode": "import Foundation\nimport XCTest\n// Implement FixtureURLProtocol and a URLSession test.",
+      "hints": [
+        "Override canInit, canonicalRequest, startLoading, and stopLoading.",
+        "Set configuration.protocolClasses before constructing the session.",
+        "Notify the URLProtocol client of response, data, and completion in that order."
+      ],
+      "solution": "import Foundation\nimport XCTest\n\nprivate final class FixtureURLProtocol: URLProtocol {\n    override class func canInit(with request: URLRequest) -> Bool {\n        request.url?.host == \"fixture.test\"\n    }\n\n    override class func canonicalRequest(\n        for request: URLRequest\n    ) -> URLRequest { request }\n\n    override func startLoading() {\n        guard let url = request.url,\n              let response = HTTPURLResponse(\n                url: url, statusCode: 200, httpVersion: \"HTTP/1.1\",\n                headerFields: [\"Content-Type\": \"application/json\"]\n              ) else { return }\n        let bytes = Data(\"[{\\\"id\\\":1,\\\"title\\\":\\\"Fixture\\\"}]\".utf8)\n        client?.urlProtocol(\n            self, didReceive: response, cacheStoragePolicy: .notAllowed\n        )\n        client?.urlProtocol(self, didLoad: bytes)\n        client?.urlProtocolDidFinishLoading(self)\n    }\n\n    override func stopLoading() {}\n}\n\nfinal class SessionBoundaryTests: XCTestCase {\n    func testReceivesFixtureResponse() async throws {\n        let configuration = URLSessionConfiguration.ephemeral\n        configuration.protocolClasses = [FixtureURLProtocol.self]\n        let session = URLSession(configuration: configuration)\n        defer { session.invalidateAndCancel() }\n\n        let url = try XCTUnwrap(URL(string: \"https://fixture.test/tasks\"))\n        let (data, response) = try await session.data(from: url)\n        let http = try XCTUnwrap(response as? HTTPURLResponse)\n        XCTAssertEqual(http.statusCode, 200)\n        XCTAssertEqual(\n            String(data: data, encoding: .utf8),\n            \"[{\\\"id\\\":1,\\\"title\\\":\\\"Fixture\\\"}]\"\n        )\n    }\n}",
+      "explanation": "This validates that your test harness controls the URLSession boundary. Next inject this session into the actual API client and assert decoded models and non-2xx behavior. The fixture finishes synchronously, so stopLoading has no outstanding operation to cancel. An asynchronous fixture would need cancellation handling.",
+      "checks": [
+        "No request reaches the public network.",
+        "Changing the fixture status or bytes changes the assertion result.",
+        "The protocol has no shared mutable static state."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "Which test double simply supplies a prepared response?",
+      "options": [
+        "A profiler",
+        "A stub",
+        "A provisioning profile",
+        "A storyboard"
+      ],
+      "answer": 1,
+      "explanation": "A stub controls returned data. A mock is useful when verifying an interaction itself is part of the requirement."
+    },
+    {
+      "question": "What is the best synchronization for an async function returning a result?",
+      "options": [
+        "Sleep for two seconds",
+        "Run the test twice",
+        "Await the function",
+        "Disable concurrency checks"
+      ],
+      "answer": 2,
+      "explanation": "Await observes actual completion and avoids timing guesses."
+    },
+    {
+      "question": "Why use accessibilityIdentifier in UI tests?",
+      "options": [
+        "It grants camera permission",
+        "It gives a stable selector independent of visible translations",
+        "It hides the control from VoiceOver",
+        "It makes every test synchronous"
+      ],
+      "answer": 1,
+      "explanation": "Identifiers let UI tests locate controls without depending entirely on localized labels."
+    },
+    {
+      "question": "Where should most view-model state tests perform network calls?",
+      "options": [
+        "Against a production server",
+        "Against a random public API",
+        "Through an injected deterministic test double",
+        "Only over cellular data"
+      ],
+      "answer": 2,
+      "explanation": "A controlled dependency makes states reproducible and keeps tests fast and independent."
+    },
+    {
+      "question": "A test fails only when the suite runs in parallel. What should you inspect first?",
+      "options": [
+        "The app icon",
+        "Shared mutable state and fixture isolation",
+        "The font family",
+        "Whether the device has a SIM card"
+      ],
+      "answer": 1,
+      "explanation": "Shared handlers, defaults, files, and databases can contaminate parallel tests."
+    }
+  ],
+  "pitfalls": [
+    "A sleep-based test can pass locally and fail on CI.",
+    "Duplicating production logic in a test can repeat the same defect.",
+    "Shared defaults, Keychain items, and URLProtocol handlers can leak across tests.",
+    "A passing service test does not prove that the UI button calls the service.",
+    "Disabling actor isolation to satisfy tests hides the production ownership problem."
+  ],
+  "checkpoint": [
+    "Write a pure boundary test that fails for a meaningful behavior change.",
+    "Test success, empty, failure, and recovery in the list view model.",
+    "Explain why each test double was chosen.",
+    "Run one critical UI flow with fixture data and stable accessibility identifiers.",
+    "Describe how out-of-order async responses would be tested without arbitrary sleeps."
+  ],
+  "references": [
+    {
+      "title": "Apple: XCTest",
+      "url": "https://developer.apple.com/documentation/xctest"
+    },
+    {
+      "title": "Apple: URLProtocol",
+      "url": "https://developer.apple.com/documentation/foundation/urlprotocol"
+    },
+    {
+      "title": "Apple: XCUIAutomation",
+      "url": "https://developer.apple.com/documentation/xcuiautomation"
+    }
+  ],
+  "capstone": {
+    "title": "Protect PocketTasks behavior",
+    "steps": [
+      "Add title-validation, empty-list, successful-load, failed-load, and retry tests.",
+      "Inject fixture services through the app's composition root when a UI-test launch argument is present.",
+      "Give the add, title, save, retry, and first task controls stable identifiers.",
+      "Add a UI test that creates a task and verifies its title appears in the list."
+    ]
+  }
+}

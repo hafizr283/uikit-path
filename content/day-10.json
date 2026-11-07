@@ -1,0 +1,239 @@
+{
+  "day": 10,
+  "title": "Concurrency without UI races",
+  "subtitle": "Use async/await, actors, and cancellation to keep UIKit responsive and state correct.",
+  "phase": "Connect",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Distinguish suspension from blocking and asynchronous code from background execution.",
+    "Use MainActor for UIKit-owned state and actors for isolated shared mutable state.",
+    "Choose structured child tasks or an explicitly owned Task appropriately.",
+    "Cancel obsolete work and prevent stale results from reaching the screen.",
+    "Recognize Swift 6 Sendable and isolation diagnostics as design feedback."
+  ],
+  "prerequisites": [
+    "Days 1–2: closures, errors, reference ownership, and weak captures.",
+    "Day 3: controller lifecycle and main-thread UI requirements."
+  ],
+  "sections": [
+    {
+      "title": "1. Async means a function can suspend",
+      "body": [
+        "An async function can pause at a suspension point while another task makes progress. Awaiting URLSession therefore does not occupy the main thread waiting for network bytes. However, async does not mean every line runs in the background. A large synchronous image transformation placed in a MainActor task still blocks the interface. Identify the expensive operation and its isolation rather than using async as a performance label.",
+        "Actors isolate mutable state. MainActor is the global actor used for most UIKit interactions. Marking a view model @MainActor makes its UI-facing state and methods consistently isolated. Swift 6 checks unsafe crossings more strictly, so compiler errors often expose a real ownership ambiguity. Do not silence them with unchecked Sendable or nonisolated(unsafe) as a first response."
+      ]
+    },
+    {
+      "title": "2. Structured work has a parent and a lifetime",
+      "body": [
+        "Use async let when a fixed number of independent operations should start together and their results are needed before the function returns. Use a task group when the number of child operations is dynamic. Structured child tasks cannot outlive the scope that owns them; errors and cancellation can propagate through that task tree. This makes their lifetime easier to reason about.",
+        "Task { ... } creates an unstructured task, often useful when a synchronous button action must enter asynchronous code. It inherits the surrounding actor context, but you own its cancellation and result handling. Store its handle if replacement, navigation, or explicit cancellation should stop it. Task.detached does not inherit that actor context and is rarely the right first tool for a screen request."
+      ]
+    },
+    {
+      "title": "3. Cancellation is a request, not a kill switch",
+      "body": [
+        "Calling cancel sets a cancellation flag and notifies cancellation-aware operations. It does not forcibly stop arbitrary code. Task.sleep and URLSession async operations cooperate with cancellation; your own loops need Task.checkCancellation or another periodic check. A request can also finish near the moment it is cancelled, so check before applying its result.",
+        "Search adds a second problem: an older request can finish after a newer one. Cancellation reduces wasted work; a request generation or matching query check guarantees that only the latest result is accepted. Treat CancellationError as an expected control-flow outcome rather than showing an error alert every time the user changes a search term or leaves a screen."
+      ]
+    },
+    {
+      "title": "4. Sendable describes safe transfer",
+      "body": [
+        "A Sendable value can cross concurrency boundaries safely. Immutable structs composed of Sendable properties are good transport models; actors are safe references to isolated state. A mutable UIKit view is not a value to send into background work. Capture the needed input value, perform work in the appropriate isolation domain, then return a result to MainActor for rendering.",
+        "Actor isolation protects individual synchronous actor segments, not an entire operation across await. While one actor method is suspended, another call can change its state. This is actor reentrancy. For example, read-check-await-write can use stale assumptions after the await. Revalidate conditions, use generation tokens, or move state changes into a synchronous actor transaction when consistency requires it."
+      ]
+    },
+    {
+      "title": "5. Bridge older APIs deliberately",
+      "body": [
+        "Company code may use completion handlers, delegates, DispatchQueue, or OperationQueue. Read their contracts: which queue invokes the completion, can it fire more than once, and how is work cancelled? A continuation can adapt a callback API to async, but it must resume exactly once. A checked continuation helps catch missing or repeated resumes during development; it does not automatically provide cancellation.",
+        "Use MainActor.run when an asynchronous context needs a short isolated UI mutation and is not already main-actor isolated. Avoid sprinkling DispatchQueue.main.async around a view model that should simply be @MainActor. For CPU-heavy work, design a clear worker boundary and pass Sendable inputs. Modern concurrency complements profiling and API contracts; it does not remove the need for them."
+      ]
+    }
+  ],
+  "example": {
+    "title": "A cancellable UIKit loading screen",
+    "filename": "AsyncDemoViewController.swift",
+    "code": "import UIKit\n\nactor MessageService {\n    func fetchMessage() async throws -> String {\n        try await Task.sleep(for: .milliseconds(900))\n        try Task.checkCancellation()\n        return \"Your task list is ready.\"\n    }\n}\n\n@MainActor\nfinal class AsyncDemoViewController: UIViewController {\n    private let service = MessageService()\n    private let label = UILabel()\n    private var loadTask: Task<Void, Never>?\n\n    override func viewDidLoad() {\n        super.viewDidLoad()\n        title = \"Async loading\"\n        view.backgroundColor = .systemBackground\n        label.text = \"Tap Load\"\n        label.textAlignment = .center\n        label.numberOfLines = 0\n\n        let button = UIButton(type: .system)\n        button.setTitle(\"Load\", for: .normal)\n        button.addTarget(self, action: #selector(load), for: .touchUpInside)\n        let stack = UIStackView(arrangedSubviews: [label, button])\n        stack.axis = .vertical\n        stack.spacing = 16\n        stack.translatesAutoresizingMaskIntoConstraints = false\n        view.addSubview(stack)\n        NSLayoutConstraint.activate([\n            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),\n            stack.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),\n            stack.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor)\n        ])\n    }\n\n    @objc private func load() {\n        loadTask?.cancel()\n        label.text = \"Loading…\"\n        let service = service\n        loadTask = Task { [weak self] in\n            do {\n                let message = try await service.fetchMessage()\n                try Task.checkCancellation()\n                self?.label.text = message\n            } catch is CancellationError {\n                // A newer load or navigation made this work unnecessary.\n            } catch {\n                self?.label.text = \"Could not load. Try again.\"\n            }\n        }\n    }\n\n    override func viewDidDisappear(_ animated: Bool) {\n        super.viewDidDisappear(animated)\n        loadTask?.cancel()\n        loadTask = nil\n    }\n}",
+    "walkthrough": [
+      "Add the file to a UIKit iOS app and push AsyncDemoViewController. MessageService uses a cancellable delay to simulate a network request; it does not access a real server.",
+      "The controller and its UI state are MainActor isolated. The button starts an unstructured Task from that context, so its UI mutations remain isolated.",
+      "The actor service suspends during the delay. It does not block the main thread while waiting.",
+      "The task closure weakly captures the controller and does not promote it to a strong reference before the await, so the request need not keep the screen alive.",
+      "A second tap cancels the previous task. Leaving the screen cancels outstanding work. The post-await check prevents a cancelled result from being rendered.",
+      "For production search with services that may ignore cancellation, also use the generation-token exercise below."
+    ],
+    "expectedOutput": "Tap Load to see a loading message, then a success message after about 0.9 seconds. Rapid taps restart the request. Navigating away cancels the outstanding delay."
+  },
+  "exercises": [
+    {
+      "id": "d10-warmup",
+      "title": "Protect a shared counter with an actor",
+      "difficulty": "Warm-up",
+      "prompt": "Create an actor-backed counter and increment it from 100 child tasks. Return the final value only after every child has completed.",
+      "requirements": [
+        "Keep the mutable counter private to the actor.",
+        "Use a task group rather than 100 untracked Task handles.",
+        "Do not use locks or unchecked Sendable."
+      ],
+      "starterCode": "actor Counter {\n    // Isolated state and methods.\n}\n\nfunc countCompletedWork() async -> Int {\n    // Start and await 100 children.\n    return 0\n}",
+      "hints": [
+        "An actor method without await runs as one uninterrupted actor segment.",
+        "Call actor methods with await from outside its isolation domain."
+      ],
+      "solution": "actor Counter {\n    private var value = 0\n    func increment() { value += 1 }\n    func currentValue() -> Int { value }\n}\n\nfunc countCompletedWork() async -> Int {\n    let counter = Counter()\n    await withTaskGroup(of: Void.self) { group in\n        for _ in 0..<100 {\n            group.addTask { await counter.increment() }\n        }\n        await group.waitForAll()\n    }\n    return await counter.currentValue()\n}",
+      "explanation": "Child tasks may execute in any order. The actor serializes access to its isolated value, and the group scope waits for completion. Serialization here protects a tiny state mutation; placing all expensive unrelated work inside one actor could unnecessarily reduce throughput.",
+      "checks": [
+        "Await the function and verify the result is always 100.",
+        "Explain why reading the value before waiting for the group would be logically premature."
+      ]
+    },
+    {
+      "id": "d10-core",
+      "title": "Load independent counts concurrently",
+      "difficulty": "Core",
+      "prompt": "Write a summary loader that fetches open and completed counts concurrently from an actor service, then returns a Sendable value.",
+      "requirements": [
+        "Use two async let bindings.",
+        "Propagate service errors to the caller.",
+        "Return both values only after both operations finish."
+      ],
+      "starterCode": "struct TaskSummary: Sendable {\n    let open: Int\n    let completed: Int\n}\n// Implement a service and summary loader.",
+      "hints": [
+        "async let starts a structured child operation.",
+        "A tuple await can collect both results."
+      ],
+      "solution": "struct TaskSummary: Sendable {\n    let open: Int\n    let completed: Int\n}\n\nactor SummaryService {\n    func openCount() async throws -> Int {\n        try await Task.sleep(for: .milliseconds(400))\n        return 8\n    }\n    func completedCount() async throws -> Int {\n        try await Task.sleep(for: .milliseconds(600))\n        return 3\n    }\n}\n\nfunc loadSummary(from service: SummaryService) async throws -> TaskSummary {\n    async let open = service.openCount()\n    async let completed = service.completedCount()\n    let values = try await (open, completed)\n    return TaskSummary(open: values.0, completed: values.1)\n}",
+      "explanation": "The service actor can accept the second call while the first is suspended in Task.sleep. The two waits overlap even though actor-isolated synchronous work never runs simultaneously on the actor. If an operation throws and the scope exits, remaining structured children are cancelled and awaited.",
+      "checks": [
+        "Verify the result is open 8 and completed 3.",
+        "Observe that elapsed time is approximately the longer delay, allowing scheduler overhead.",
+        "Replace one return with a thrown error and verify the caller receives it."
+      ]
+    },
+    {
+      "id": "d10-stretch",
+      "title": "Reject stale search results",
+      "difficulty": "Stretch",
+      "prompt": "Implement a MainActor search model with debounce, cancellation, and a generation check. The latest query must win even when earlier work finishes later.",
+      "requirements": [
+        "Use a 250 ms debounce.",
+        "Capture the query value for that request.",
+        "Do not deliver cancellation as an error to the user.",
+        "Provide an explicit cancel method for the screen owner."
+      ],
+      "starterCode": "actor TaskSearchService {\n    func search(_ query: String) async throws -> [String] {\n        try await Task.sleep(for: .milliseconds(300))\n        return [\"Result for \\(query)\"]\n    }\n}\n// Implement SearchModel.",
+      "hints": [
+        "Increment a generation before starting each request.",
+        "Compare the captured generation immediately before delivering results."
+      ],
+      "solution": "@MainActor\nfinal class SearchModel {\n    private let service = TaskSearchService()\n    private var request: Task<Void, Never>?\n    private var generation = 0\n    var onResults: (([String]) -> Void)?\n    var onError: ((String) -> Void)?\n\n    func search(_ query: String) {\n        generation += 1\n        let current = generation\n        request?.cancel()\n        let service = service\n        request = Task { [weak self] in\n            do {\n                try await Task.sleep(for: .milliseconds(250))\n                let results = try await service.search(query)\n                try Task.checkCancellation()\n                guard let self, current == self.generation else { return }\n                self.onResults?(results)\n            } catch is CancellationError {\n            } catch {\n                guard let self, current == self.generation else { return }\n                self.onError?(\"Search failed. Please retry.\")\n            }\n        }\n    }\n\n    func cancel() {\n        generation += 1\n        request?.cancel()\n        request = nil\n    }\n}",
+      "explanation": "The request handle reduces unnecessary work, while the generation check is the acceptance rule for results. Bind onResults from a controller using a weak controller capture, and call cancel when the owning screen no longer needs results. Keeping the entire model on MainActor also makes generation comparisons and delivery one uninterrupted state transition.",
+      "checks": [
+        "Search for a, then ab, then abc rapidly; only abc is delivered.",
+        "Cancel before the debounce expires and verify no result is delivered.",
+        "Simulate a slow first request and faster second request; the first must never replace the second."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "Does adding async to a function move all its computation off the main actor?",
+      "options": [
+        "Yes, always",
+        "Only if it returns Void",
+        "No; suspension and execution isolation are separate concerns",
+        "Yes, if it contains a print statement"
+      ],
+      "answer": 2,
+      "explanation": "Async permits suspension. Actor context and the operation's implementation determine where synchronous work runs."
+    },
+    {
+      "question": "What does Task.cancel() guarantee?",
+      "options": [
+        "It forcibly terminates every instruction immediately",
+        "It requests cancellation that work must cooperate with",
+        "It automatically displays an error alert",
+        "It releases every captured object immediately"
+      ],
+      "answer": 1,
+      "explanation": "Cancellation is cooperative. Use cancellation-aware APIs and check cancellation before accepting results or during long-running loops."
+    },
+    {
+      "question": "Which tool fits two independent operations whose results are needed in the current function?",
+      "options": [
+        "Two forgotten Task.detached calls",
+        "async let bindings",
+        "A global mutable array",
+        "A blocking semaphore on MainActor"
+      ],
+      "answer": 1,
+      "explanation": "async let provides structured child tasks with a scope-bound lifetime and straightforward result collection."
+    },
+    {
+      "question": "Why can actor state change while an actor method is awaiting?",
+      "options": [
+        "Actors provide no isolation",
+        "The actor can process other calls during suspension",
+        "The compiler copies the entire actor",
+        "Await disables memory management"
+      ],
+      "answer": 1,
+      "explanation": "Actors are reentrant across suspension points. Revalidate assumptions made before await if correctness depends on them."
+    },
+    {
+      "question": "What is the strongest way to stop an old search from replacing newer results?",
+      "options": [
+        "Only make the spinner slower",
+        "Always ignore all errors",
+        "Cancel old work and validate a request generation before delivery",
+        "Store the old index path"
+      ],
+      "answer": 2,
+      "explanation": "Cancellation saves work but may race with completion or be ignored. Generation validation determines whether a result still belongs to the current request."
+    }
+  ],
+  "pitfalls": [
+    "Doing CPU-heavy synchronous work inside a MainActor task and expecting async to make it cheap.",
+    "Treating Task cancellation as forced termination.",
+    "Strongly retaining a controller across a long await without considering its lifetime.",
+    "Using Task.detached to bypass isolation diagnostics.",
+    "Assuming actor state cannot change across an await.",
+    "Showing cancellation as a user-facing failure during ordinary navigation."
+  ],
+  "checkpoint": [
+    "Explain async suspension versus blocking with one UIKit example.",
+    "Show which object owns every unstructured task handle.",
+    "Demonstrate cancellation during navigation and rapid search changes.",
+    "Explain why a generation check protects against stale results.",
+    "Read a Swift 6 isolation diagnostic and identify the boundary it is protecting."
+  ],
+  "references": [
+    {
+      "title": "Swift concurrency",
+      "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/"
+    },
+    {
+      "title": "Task",
+      "url": "https://developer.apple.com/documentation/swift/task"
+    },
+    {
+      "title": "MainActor",
+      "url": "https://developer.apple.com/documentation/swift/mainactor"
+    },
+    {
+      "title": "Sendable",
+      "url": "https://developer.apple.com/documentation/swift/sendable"
+    }
+  ],
+  "capstone": {
+    "title": "PocketTasks milestone: responsive asynchronous work",
+    "steps": [
+      "Add an actor-backed mock task service with controllable delay and failure.",
+      "Represent loading state on MainActor and keep the interface responsive.",
+      "Give each screen-owned request a cancellation policy.",
+      "Implement debounced task search with a latest-request acceptance rule."
+    ]
+  }
+}

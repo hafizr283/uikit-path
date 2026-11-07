@@ -1,0 +1,243 @@
+{
+  "day": 19,
+  "title": "iOS platform integration",
+  "subtitle": "Connect your app to system features without losing control of its state.",
+  "phase": "Ship with confidence",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Request permissions in context and handle denial as a normal state.",
+    "Integrate system pickers, sharing, and security-scoped documents.",
+    "Parse deep links into validated routes before navigation.",
+    "Explain notifications, scene transitions, restoration, and background limits."
+  ],
+  "prerequisites": [
+    "Day 3: scene and view-controller lifecycles.",
+    "Day 6: navigation and presentation.",
+    "Day 10: async work and cancellation.",
+    "Day 15: session boundaries and account authorization."
+  ],
+  "sections": [
+    {
+      "title": "1. Request permission when the user understands why",
+      "body": [
+        "System permissions protect resources such as camera, microphone, location, and notifications. Ask at the point of a relevant action, with a clear explanation of the benefit. Requesting everything at first launch increases denial and leaves the user without context. The required usage-description keys must explain your actual behavior; a generic 'permission needed' string is not a useful explanation.",
+        "Treat notDetermined, authorized, denied, restricted, and feature-specific limited states deliberately. A denied camera permission should lead to an explanation and another way to continue, not a request loop. Prefer a system picker when it provides the access you need without broad library permission. PHPickerViewController lets a user choose photo-library items through a system-managed interface; direct camera capture is a separate capability with its own permission requirements."
+      ]
+    },
+    {
+      "title": "2. Let system controllers do focused work",
+      "body": [
+        "Use a photo picker for selected images, a document picker for files, and UIActivityViewController for sharing. These controllers give familiar UI and handle parts of the platform contract, but your app must still handle cancellation, unsupported content, large files, and errors. On iPad, a share sheet presented as a popover needs an anchor such as a bar button item or a source view and rectangle.",
+        "An imported document may live outside your sandbox. When appropriate, use startAccessingSecurityScopedResource and balance it with stopAccessingSecurityScopedResource. For a durable copy, import into your own application-support directory instead of retaining a temporary URL forever. If the product needs ongoing access to an external document, study security-scoped bookmarks and file coordination. Keep potentially expensive decoding and file processing away from time-critical UI work."
+      ]
+    },
+    {
+      "title": "3. Parse links before touching navigation",
+      "body": [
+        "A deep link is external input. Convert it into a small internal route type, rejecting unsupported schemes, hosts, paths, identifiers, and parameters. Do not treat the URL as an instruction to instantiate an arbitrary class or load an arbitrary authenticated endpoint. Route parsing should be a pure function so malformed links and edge cases can be tested without launching UIKit.",
+        "Universal Links require both the Associated Domains entitlement and the website's apple-app-site-association configuration; adding a URL parser alone does not establish the association. Custom URL schemes require app registration and do not offer the same domain ownership guarantee. Handle incoming URLs and user activities in the scene lifecycle, including cold launch connection options. If the route requires login, preserve only a safe internal route, authenticate, then revalidate access to the requested task on the server or repository."
+      ]
+    },
+    {
+      "title": "4. Notifications are delivery hints, not guaranteed execution",
+      "body": [
+        "Local notifications are scheduled by the app; remote notifications arrive through APNs after server-side configuration. User permission controls user-facing notification behavior. A notification payload should carry the minimum routing information, not secrets or the only copy of important data. When the user opens a notification, use the same validated routing layer as a deep link and fetch the current authorized content.",
+        "Background execution is constrained by the system. Going to the background does not give an app an unlimited timer, and silent push is not a guaranteed job scheduler. BGTaskScheduler requires capabilities, permitted identifiers, registered handlers, and suitable task completion behavior; the system decides when eligible work runs. Always handle expiration and finish promptly. For the course, first build a correct local reminder flow and document which production server and entitlement work remains."
+      ]
+    },
+    {
+      "title": "5. Restore useful state without storing private screen snapshots",
+      "body": [
+        "Scenes can connect, disconnect, enter the background, and be discarded. Save durable model changes when the user makes them rather than relying on termination callbacks. Persist a small, versioned description of useful UI state, such as a selected task ID or filter. After restoration, look up that identifier again because the task may have been deleted or access may have changed.",
+        "On returning to the foreground, decide what should refresh and what should remain stable. Avoid dismissing an editor or resetting a scroll position merely because a permission sheet temporarily changed activity state. Multiple scenes can show the same underlying data, so the repository should be the shared source of truth rather than a controller-owned copy with hidden persistence. Test cold launch, warm link delivery, cancellation, denial, and background-to-foreground transitions as separate cases."
+      ]
+    }
+  ],
+  "example": {
+    "title": "A validated deep-link parser",
+    "filename": "AppRoute.swift",
+    "code": "import Foundation\n\nenum AppRoute: Equatable, Sendable {\n    case task(UUID)\n}\n\nstruct DeepLinkParser {\n    let universalLinkHost: String\n\n    func parse(_ url: URL) -> AppRoute? {\n        guard url.user == nil, url.password == nil,\n              url.query == nil, url.fragment == nil else {\n            return nil\n        }\n        let parts = url.path.split(separator: \"/\").map(String.init)\n        let candidate: String\n\n        switch url.scheme?.lowercased() {\n        case \"https\":\n            guard url.host?.lowercased() ==\n                    universalLinkHost.lowercased(),\n                  url.port == nil || url.port == 443,\n                  parts.count == 2,\n                  parts[0] == \"tasks\" else { return nil }\n            candidate = parts[1]\n        case \"pockettasks\":\n            guard url.host?.lowercased() == \"task\",\n                  url.port == nil,\n                  parts.count == 1 else { return nil }\n            candidate = parts[0]\n        default:\n            return nil\n        }\n\n        guard let id = UUID(uuidString: candidate) else {\n            return nil\n        }\n        return .task(id)\n    }\n}\n\n// Fixture use:\n// let parser = DeepLinkParser(\n//     universalLinkHost: \"pockettasks.example\"\n// )\n// let url = URL(string:\n//   \"pockettasks://task/00000000-0000-0000-0000-000000000001\"\n// )!\n// parser.parse(url) -> .task(the UUID above)\n//\n// The .example host is documentation-only, not a live service.",
+    "walkthrough": [
+      "Add the parser to the app or a shared model target. It uses Foundation only, so its behavior can be unit tested without constructing a controller.",
+      "Register the pockettasks custom scheme in the app target's URL Types if you want to open it from the simulator. The parser alone does not register the scheme.",
+      "For a warm custom-scheme launch, obtain URLs in scene(_:openURLContexts:). For a Universal Link, inspect the webpageURL from the browsing user activity. Also check scene connection options on cold launch.",
+      "Pass the parsed AppRoute to a MainActor coordinator. Check session state and whether the task exists and is accessible before presenting details.",
+      "The accepted grammar intentionally rejects all query strings and fragments. Expand it only when a feature needs documented parameters, and add matching tests."
+    ],
+    "expectedOutput": "Only recognized HTTPS routes on the configured host and recognized pockettasks task URLs produce a task route. Malformed identifiers, foreign hosts, credentials, and unsupported parameters return nil."
+  },
+  "exercises": [
+    {
+      "id": "19-warmup",
+      "title": "Present an iPad-safe share sheet",
+      "difficulty": "Warm-up",
+      "prompt": "Add a reusable share function for a task's plain-text summary. It must work when UIKit chooses a popover presentation on iPad.",
+      "requirements": [
+        "Use UIActivityViewController.",
+        "Anchor to a supplied source view.",
+        "Do not put credentials or hidden account data in the shared text."
+      ],
+      "starterCode": "import UIKit\n@MainActor\nfunc share(text: String, from controller: UIViewController,\n           sourceView: UIView) {\n    // Present and configure the popover anchor.\n}",
+      "hints": [
+        "The popoverPresentationController is optional.",
+        "sourceRect uses the source view's own coordinate system."
+      ],
+      "solution": "import UIKit\n@MainActor\nfunc share(text: String, from controller: UIViewController,\n           sourceView: UIView) {\n    let activity = UIActivityViewController(\n        activityItems: [text],\n        applicationActivities: nil\n    )\n    if let popover = activity.popoverPresentationController {\n        popover.sourceView = sourceView\n        popover.sourceRect = sourceView.bounds\n    }\n    controller.present(activity, animated: true)\n}",
+      "explanation": "Anchoring avoids the common iPad exception for an unconfigured popover. The caller should pass a currently visible view and avoid presenting while another conflicting presentation is active.",
+      "checks": [
+        "The share sheet opens on an iPhone simulator.",
+        "On an iPad simulator, it is anchored to the source control.",
+        "Cancelling the sheet leaves the task unchanged."
+      ]
+    },
+    {
+      "id": "19-core",
+      "title": "Read a small imported text file safely",
+      "difficulty": "Core",
+      "prompt": "A document picker returns a URL. Read at most 64 KiB of UTF-8 task notes, balance security-scoped access, and reject larger or invalid text.",
+      "requirements": [
+        "Balance start/stop access with defer.",
+        "Read one byte beyond the limit to detect an oversized file.",
+        "Close the FileHandle even when validation fails.",
+        "Return clear errors; do not substitute an empty successful result."
+      ],
+      "starterCode": "import Foundation\nenum ImportError: Error { case tooLarge, invalidText }\nfunc importNotes(from url: URL) throws -> String {\n    // Open, read a bounded amount, and validate UTF-8.\n    \"\"\n}",
+      "hints": [
+        "FileHandle.read(upToCount:) lets you bound the requested read.",
+        "A false startAccessing result does not necessarily mean a sandbox-owned URL is unreadable."
+      ],
+      "solution": "import Foundation\n\nenum ImportError: Error {\n    case tooLarge\n    case invalidText\n}\n\nfunc importNotes(from url: URL) throws -> String {\n    let scoped = url.startAccessingSecurityScopedResource()\n    defer {\n        if scoped { url.stopAccessingSecurityScopedResource() }\n    }\n\n    let file = try FileHandle(forReadingFrom: url)\n    defer { try? file.close() }\n\n    let limit = 64 * 1024\n    var data = Data()\n    while data.count <= limit {\n        let remaining = limit + 1 - data.count\n        guard let chunk = try file.read(upToCount: remaining),\n              !chunk.isEmpty else { break }\n        data.append(chunk)\n    }\n\n    guard data.count <= limit else { throw ImportError.tooLarge }\n    guard let text = String(data: data, encoding: .utf8) else {\n        throw ImportError.invalidText\n    }\n    return text\n}",
+      "explanation": "The loop handles partial reads while never accumulating more than the limit plus one byte. It avoids assuming that a file-size metadata check remains true until reading completes. Perform file I/O through an appropriate service away from time-critical UI work; copy accepted content into your repository if it should persist.",
+      "checks": [
+        "A valid short UTF-8 file returns its text.",
+        "A 65,537-byte file is rejected for size.",
+        "Invalid UTF-8 is rejected.",
+        "The resource scope and file handle are released on both success and error."
+      ]
+    },
+    {
+      "id": "19-stretch",
+      "title": "Schedule and cancel a local reminder",
+      "difficulty": "Stretch",
+      "prompt": "Build a fixture reminder helper that asks for alert permission in context and schedules a one-off reminder at least one second in the future. Use a stable task-specific identifier so rescheduling replaces the pending reminder.",
+      "requirements": [
+        "Surface denial instead of pretending a reminder was scheduled.",
+        "Use UNUserNotificationCenter's async APIs.",
+        "Keep private task details out of notification text by default.",
+        "Provide a cancellation function."
+      ],
+      "starterCode": "import Foundation\nimport UserNotifications\nenum ReminderError: Error { case denied, invalidDate }\n// Add schedule and cancel methods for a task UUID.",
+      "hints": [
+        "Use a consistent request identifier derived from the task ID.",
+        "A non-repeating UNTimeIntervalNotificationTrigger can use a future interval.",
+        "Adding a request with the same identifier replaces the pending request."
+      ],
+      "solution": "import Foundation\nimport UserNotifications\n\nenum ReminderError: Error {\n    case denied\n    case invalidDate\n}\n\n@MainActor\nstruct ReminderScheduler {\n    private func identifier(for id: UUID) -> String {\n        \"task-reminder-\" + id.uuidString\n    }\n\n    func schedule(taskID: UUID, at date: Date) async throws {\n        let interval = date.timeIntervalSinceNow\n        guard interval >= 1 else {\n            throw ReminderError.invalidDate\n        }\n        let center = UNUserNotificationCenter.current()\n        let granted = try await center.requestAuthorization(\n            options: [.alert, .sound]\n        )\n        guard granted else { throw ReminderError.denied }\n\n        let content = UNMutableNotificationContent()\n        content.title = String(localized: \"Task reminder\")\n        content.body = String(localized: \"Open PocketTasks to review your task.\")\n        content.sound = .default\n        content.userInfo = [\"taskID\": taskID.uuidString]\n\n        let remaining = date.timeIntervalSinceNow\n        guard remaining >= 1 else {\n            throw ReminderError.invalidDate\n        }\n        let request = UNNotificationRequest(\n            identifier: identifier(for: taskID),\n            content: content,\n            trigger: UNTimeIntervalNotificationTrigger(\n                timeInterval: remaining, repeats: false\n            )\n        )\n        try await center.add(request)\n    }\n\n    func cancel(taskID: UUID) {\n        UNUserNotificationCenter.current()\n            .removePendingNotificationRequests(\n                withIdentifiers: [identifier(for: taskID)]\n            )\n    }\n}",
+      "explanation": "Authorization can take time, so the solution recomputes the remaining interval afterward. A scheduled request is not a promise of exact visual delivery: user settings and system behavior still apply. Foreground presentation and tap routing require a UNUserNotificationCenterDelegate wired by the app.",
+      "checks": [
+        "Denial produces a recoverable error.",
+        "Rescheduling the same task replaces its pending identifier.",
+        "Cancelling removes the pending request.",
+        "A past date is rejected, including one that passes while permission is being requested."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "What should happen after a user denies camera permission?",
+      "options": [
+        "Request it repeatedly until they agree",
+        "Crash to force a restart",
+        "Explain the limitation and offer a useful alternative or settings path",
+        "Silently claim the photo was captured"
+      ],
+      "answer": 2,
+      "explanation": "Denial is a supported product state. The user should understand the limitation and be able to continue where possible."
+    },
+    {
+      "question": "What does a deep-link parser alone establish?",
+      "options": [
+        "Universal Link domain association",
+        "App Store approval",
+        "A validated internal route from accepted input",
+        "Authorization to view any task"
+      ],
+      "answer": 2,
+      "explanation": "Domain association and resource authorization are separate requirements."
+    },
+    {
+      "question": "Why use defer around security-scoped access?",
+      "options": [
+        "It encrypts every file",
+        "It balances resource access even when reading throws",
+        "It grants permanent permission",
+        "It turns all file work asynchronous"
+      ],
+      "answer": 1,
+      "explanation": "Cleanup must run on success and failure. Start/stop calls must remain balanced."
+    },
+    {
+      "question": "Which statement about silent pushes is correct?",
+      "options": [
+        "They are guaranteed timers",
+        "They allow unlimited background execution",
+        "Delivery and background execution are controlled by the system",
+        "They replace all local persistence"
+      ],
+      "answer": 2,
+      "explanation": "Design for delays, non-delivery, and expiration rather than treating background push as a guaranteed scheduler."
+    },
+    {
+      "question": "What is appropriate state to restore for a task detail screen?",
+      "options": [
+        "An unchecked old array index",
+        "A password in plain text",
+        "A stable task ID that is looked up and revalidated",
+        "A complete copy of every network header"
+      ],
+      "answer": 2,
+      "explanation": "Persist minimal state and revalidate the underlying content and permissions."
+    }
+  ],
+  "pitfalls": [
+    "A usage-description key is not a substitute for a contextual permission flow.",
+    "An unanchored share popover can fail on iPad.",
+    "Temporary document URLs are not a durable storage strategy.",
+    "A parsed link still needs authentication and authorization checks.",
+    "Background execution and notification delivery are not guaranteed schedules."
+  ],
+  "checkpoint": [
+    "Handle permission approval, denial, and cancellation without trapping the user.",
+    "Present sharing correctly on both phone and tablet.",
+    "Test accepted and rejected deep-link inputs.",
+    "Read an imported file with bounded size and balanced resource access.",
+    "Explain cold launch, warm link delivery, and foreground restoration separately."
+  ],
+  "references": [
+    {
+      "title": "Apple: PHPickerViewController",
+      "url": "https://developer.apple.com/documentation/photosui/phpickerviewcontroller"
+    },
+    {
+      "title": "Apple: Supporting Universal Links in your app",
+      "url": "https://developer.apple.com/documentation/xcode/supporting-universal-links-in-your-app"
+    },
+    {
+      "title": "Apple: User Notifications",
+      "url": "https://developer.apple.com/documentation/usernotifications"
+    },
+    {
+      "title": "Apple: Background Tasks",
+      "url": "https://developer.apple.com/documentation/backgroundtasks"
+    }
+  ],
+  "capstone": {
+    "title": "Connect PocketTasks to system workflows",
+    "steps": [
+      "Add sharing for a task summary with a correct iPad anchor.",
+      "Import small text notes through a document picker and persist the accepted text.",
+      "Use the shared route parser for custom links and future notification taps.",
+      "Add fixture local reminders, then document the additional Universal Links and remote-notification configuration needed for production."
+    ]
+  }
+}

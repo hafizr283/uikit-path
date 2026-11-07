@@ -1,0 +1,83 @@
+name: Native UIKit
+
+on:
+  push:
+    paths:
+      - 'native/**'
+      - '.github/workflows/native.yml'
+  pull_request:
+    paths:
+      - 'native/**'
+      - '.github/workflows/native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain and select an iPhone simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          python3 - <<'PY'
+          import json, os, subprocess
+          data = json.loads(subprocess.check_output(
+              ["xcrun", "simctl", "list", "devices", "available", "--json"],
+              text=True
+          ))
+          candidates = [
+              device
+              for runtime, devices in data["devices"].items()
+              if "iOS" in runtime
+              for device in devices
+              if device.get("isAvailable") and device["name"].startswith("iPhone")
+          ]
+          if not candidates:
+              raise SystemExit("No available iPhone simulator on the runner.")
+          chosen = candidates[0]
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write("SIMULATOR_UDID=" + chosen["udid"] + "\n")
+          print("Selected simulator: " + chosen["name"])
+          PY
+      - name: Build simulator app
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project native/PocketTasks/PocketTasks.xcodeproj \
+            -scheme PocketTasks \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Run native unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -project native/PocketTasks/PocketTasks.xcodeproj \
+            -scheme PocketTasks \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -parallel-testing-enabled NO \
+            -derivedDataPath .build/DerivedData \
+            -resultBundlePath .build/NativeTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Preserve test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-test-results
+          path: .build/NativeTests.xcresult
+          if-no-files-found: ignore

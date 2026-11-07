@@ -1,0 +1,243 @@
+{
+  "day": 12,
+  "title": "Reliable API-powered screens",
+  "subtitle": "Handle loading, empty content, refresh, search, pagination, and reused images as explicit state.",
+  "phase": "Connect",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Represent a screen's asynchronous states without contradictory booleans.",
+    "Connect a service to UIKit through one rendering path.",
+    "Protect search and pagination against duplicated or stale work.",
+    "Keep refreshing and loading-more behavior distinct from initial loading.",
+    "Prevent asynchronous images from appearing in the wrong reused cell."
+  ],
+  "prerequisites": [
+    "Days 8–9: diffable data sources and reuse.",
+    "Days 10–11: cancellation, request identity, URLSession, and typed API results."
+  ],
+  "sections": [
+    {
+      "title": "1. A screen is a state machine",
+      "body": [
+        "Several booleans such as isLoading, hasError, and isEmpty permit contradictory combinations. A single state enum expresses valid alternatives: idle, loading, loaded items, or failure. Rendering becomes a function of that state rather than a collection of unrelated label mutations scattered across callbacks. The example starts with this small model so you can trace every transition.",
+        "Real screens often need richer states. Refresh can retain existing content while showing a small indicator; loading the next page should not replace the entire list with a spinner. A failure after existing content was shown may deserve an inline banner rather than a blank screen. Represent those distinctions explicitly once the product needs them instead of forcing them into a first-load-only enum."
+      ]
+    },
+    {
+      "title": "2. Keep one path from result to presentation",
+      "body": [
+        "The service returns models or throws. The screen model accepts only the current request's result and publishes a state. The controller renders that state into its list, message, and controls. Keeping these responsibilities separate makes failure cases testable without displaying a window. It also avoids a success callback updating one label while an older failure callback changes another.",
+        "The controller should end refresh indicators on every terminal outcome. A zero-item success is an empty state, not a network failure. An error message should explain a recovery action such as retry, while diagnostic details stay in development logs. Retry should initiate a fresh state transition through the same load method instead of duplicating request code inside an alert action."
+      ]
+    },
+    {
+      "title": "3. Search has both timing and identity",
+      "body": [
+        "Debouncing waits briefly after typing stops before starting a request. It reduces load but does not guarantee correct ordering. Cancel the old task and assign each search a generation or request ID; accept a response only if it still matches the current query state. Capture the query value at request creation so later text-field changes cannot silently alter its interpretation.",
+        "Decide what an empty query means: all tasks, recent tasks, or no search results. Reset pagination when the search query or filters change because an old cursor belongs to an old result set. Do not append results for query A to a list currently showing query B. Request identity should include the dimensions that determine the dataset, not only a timestamp."
+      ]
+    },
+    {
+      "title": "4. Pagination needs a guarded transition",
+      "body": [
+        "A next-page request needs at least the next cursor, a loading-more flag or state, and a rule for whether more results exist. Multiple willDisplay or prefetch callbacks may arrive before the first request finishes. Guard the transition before awaiting so only one request uses the current cursor. Advance the cursor only after accepting the successful response.",
+        "Append by stable identifier, preserving order and handling duplicate records according to the API contract. Retrying a failed page should retry the same cursor rather than skipping ahead. Initial refresh or a filter change invalidates any in-flight page. Cursor pagination is often more stable than numeric offsets under server-side insertions, but the server's documented contract determines the client implementation."
+      ]
+    },
+    {
+      "title": "5. Images are asynchronous model content",
+      "body": [
+        "A reused image cell must clear its old image immediately and associate the request with the new item's identity or URL. Cancel old work when the cell is reconfigured or reused. Before assigning a completed image, check that the cell still represents the same URL. Cancellation alone cannot prevent every race between completion and reuse.",
+        "Cache by a meaningful image key that includes transformations when necessary, and distinguish HTTP response caching from decoded-image caching. Large image decoding and resizing can affect scrolling even when downloading is asynchronous. The exercise focuses on identity correctness; production image pipelines also need bounded caches, prepared thumbnail sizes, request coalescing, memory-pressure handling, and measured performance."
+      ]
+    }
+  ],
+  "example": {
+    "title": "A UIKit screen with explicit load states",
+    "filename": "APITasksViewController.swift",
+    "code": "import UIKit\n\n// This file uses TaskAPI, RemoteTask, and APIError from Day 11.\nenum TaskListState {\n    case idle\n    case loading\n    case loaded([RemoteTask])\n    case failed(String)\n}\n\n@MainActor\nfinal class TaskListModel {\n    private let api: TaskAPI\n    private var request: Task<Void, Never>?\n    private var generation = 0\n    var onChange: ((TaskListState) -> Void)?\n    private(set) var state: TaskListState = .idle {\n        didSet { onChange?(state) }\n    }\n\n    init(api: TaskAPI) { self.api = api }\n\n    func load() {\n        generation += 1\n        let current = generation\n        request?.cancel()\n        state = .loading\n        let api = api\n        request = Task { [weak self] in\n            do {\n                let items = try await api.fetchTasks()\n                try Task.checkCancellation()\n                guard let self, current == self.generation else { return }\n                self.state = .loaded(items)\n            } catch is CancellationError {\n            } catch {\n                guard let self, current == self.generation else { return }\n                self.state = .failed(\"Could not load tasks. Tap Reload to try again.\")\n            }\n        }\n    }\n\n    func cancel() {\n        generation += 1\n        request?.cancel()\n        request = nil\n    }\n}\n\n@MainActor\nfinal class APITasksViewController: UITableViewController {\n    private let model: TaskListModel\n    private var items: [Int: RemoteTask] = [:]\n    private var source: UITableViewDiffableDataSource<Int, Int>!\n\n    init(api: TaskAPI) {\n        model = TaskListModel(api: api)\n        super.init(style: .insetGrouped)\n    }\n\n    required init?(coder: NSCoder) {\n        fatalError(\"Create this controller with init(api:).\")\n    }\n\n    override func viewDidLoad() {\n        super.viewDidLoad()\n        title = \"Remote tasks\"\n        navigationItem.rightBarButtonItem = UIBarButtonItem(\n            title: \"Reload\", style: .plain,\n            target: self, action: #selector(reload)\n        )\n        tableView.register(UITableViewCell.self, forCellReuseIdentifier: \"task\")\n        source = UITableViewDiffableDataSource(tableView: tableView) {\n            [weak self] table, path, id in\n            guard let task = self?.items[id] else { return nil }\n            let cell = table.dequeueReusableCell(withIdentifier: \"task\", for: path)\n            var content = cell.defaultContentConfiguration()\n            content.text = task.title\n            content.textProperties.numberOfLines = 0\n            cell.contentConfiguration = content\n            cell.accessoryType = task.completed ? .checkmark : .none\n            return cell\n        }\n        refreshControl = UIRefreshControl()\n        refreshControl?.addTarget(self, action: #selector(reload), for: .valueChanged)\n        model.onChange = { [weak self] state in self?.render(state) }\n    }\n\n    override func viewWillAppear(_ animated: Bool) {\n        super.viewWillAppear(animated)\n        model.load()\n    }\n\n    override func viewDidDisappear(_ animated: Bool) {\n        super.viewDidDisappear(animated)\n        model.cancel()\n    }\n\n    @objc private func reload() { model.load() }\n\n    private func render(_ state: TaskListState) {\n        var rows: [RemoteTask] = []\n        let message: String?\n        switch state {\n        case .idle:\n            message = \"Ready to load.\"\n        case .loading:\n            message = \"Loading tasks…\"\n        case .loaded(let loaded):\n            rows = loaded\n            message = loaded.isEmpty ? \"No tasks yet.\" : nil\n            refreshControl?.endRefreshing()\n        case .failed(let text):\n            message = text\n            refreshControl?.endRefreshing()\n        }\n        items = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })\n        var snapshot = NSDiffableDataSourceSnapshot<Int, Int>()\n        snapshot.appendSections([0])\n        var seen = Set<Int>()\n        snapshot.appendItems(rows.compactMap { seen.insert($0.id).inserted ? $0.id : nil })\n        source.apply(snapshot, animatingDifferences: false)\n\n        if let message {\n            let label = UILabel()\n            label.text = message\n            label.numberOfLines = 0\n            label.textAlignment = .center\n            tableView.backgroundView = label\n        } else {\n            tableView.backgroundView = nil\n        }\n    }\n}",
+    "walkthrough": [
+      "Include Day 11's TaskAPI.swift. Construct APITasksViewController(api: TaskAPI(baseURL: yourURL)) and place it in a navigation controller so Reload is visible.",
+      "The model's callback is bound before viewWillAppear starts loading. Reappearing deliberately starts a fresh load; a production screen may use freshness rules instead.",
+      "The request generation ensures cancelled or superseded requests cannot publish success or failure into a newer screen state.",
+      "render handles all visual states and deduplicates remote IDs before building the snapshot. Its example policy keeps the latest content for a duplicate ID.",
+      "This introductory state model clears existing rows during refresh. The Warm-up exercise designs a richer state model that preserves content while refresh is in progress."
+    ],
+    "expectedOutput": "The screen shows loading, then task rows or a distinct empty/error message. Pull-to-refresh and Reload follow the same request path. A superseded result cannot replace a newer one."
+  },
+  "exercises": [
+    {
+      "id": "d12-warmup",
+      "title": "Define valid screen states",
+      "difficulty": "Warm-up",
+      "prompt": "A screen has independent isLoading, errorText, and rows variables. Replace those with a state that explicitly supports refreshing existing content.",
+      "requirements": [
+        "Represent initial loading separately from refreshing.",
+        "Keep a success with zero rows distinct from failure.",
+        "Preserve previous rows in a recoverable failure if available."
+      ],
+      "starterCode": "enum InboxState {\n    // Model valid presentation alternatives.\n}",
+      "hints": [
+        "Associated values can carry existing rows.",
+        "A separate refreshing case makes its behavior visible to the renderer."
+      ],
+      "solution": "enum InboxState {\n    case idle\n    case loading\n    case content([RemoteTask])\n    case refreshing([RemoteTask])\n    case failed(message: String, previous: [RemoteTask])\n}",
+      "explanation": "This enum prevents an impossible combination such as initial loading plus a final error flag. It also describes the product decision that a refresh failure may retain previous content. Your renderer should show an inline message when previous is nonempty and a full error state when it is empty.",
+      "checks": [
+        "Explain how a zero-row content state differs from failed.",
+        "Draw the transitions for initial success, refresh success, and refresh failure.",
+        "Identify which cases show a full-screen loader versus a small refresh indicator."
+      ]
+    },
+    {
+      "id": "d12-core",
+      "title": "Deduplicate an accepted page",
+      "difficulty": "Core",
+      "prompt": "Implement a pure function that merges a page of tasks into existing ordered content. Keep the first-seen position for each ID while allowing the newest payload to replace its content.",
+      "requirements": [
+        "Preserve existing order.",
+        "Append only genuinely new IDs.",
+        "Handle duplicates both across pages and within one page.",
+        "Keep the function independent of UIKit."
+      ],
+      "starterCode": "func mergePage(existing: [RemoteTask], incoming: [RemoteTask]) -> [RemoteTask] {\n    return existing + incoming\n}",
+      "hints": [
+        "Track order separately from the dictionary of newest values.",
+        "Process existing and incoming through the same loop."
+      ],
+      "solution": "func mergePage(existing: [RemoteTask], incoming: [RemoteTask]) -> [RemoteTask] {\n    var order: [Int] = []\n    var values: [Int: RemoteTask] = [:]\n    for task in existing + incoming {\n        if values[task.id] == nil { order.append(task.id) }\n        values[task.id] = task\n    }\n    return order.compactMap { values[$0] }\n}",
+      "explanation": "Stable order and current content are separate responsibilities. This merge policy is appropriate only if later payloads are authoritative for the same task. If the API provides versions or updated timestamps, compare them instead of assuming arrival order equals freshness. Call this only after verifying that the page belongs to the current query and cursor.",
+      "checks": [
+        "Existing IDs [1, 2] plus incoming [2, 3] produces [1, 2, 3].",
+        "The incoming content for ID 2 replaces the old content.",
+        "Incoming [3, 3] adds one ID and keeps the latest payload.",
+        "An empty page leaves existing rows unchanged."
+      ]
+    },
+    {
+      "id": "d12-stretch",
+      "title": "Protect a reusable image view",
+      "difficulty": "Stretch",
+      "prompt": "Write a small MainActor image loader that clears old content, cancels an earlier request, and checks the requested URL before assigning an image.",
+      "requirements": [
+        "Use a weak UIImageView reference.",
+        "Validate the HTTP response.",
+        "Do not retain the image view across the network await.",
+        "Provide cancel() for prepareForReuse.",
+        "Document that this exercise is not a complete image cache."
+      ],
+      "starterCode": "@MainActor\nfinal class CellImageLoader {\n    // Own one image request for one cell.\n}",
+      "hints": [
+        "Capture the URL as a value and compare it with the current URL.",
+        "Fetch Data asynchronously, then create and assign the image only for the accepted request."
+      ],
+      "solution": "@MainActor\nfinal class CellImageLoader {\n    private weak var imageView: UIImageView?\n    private var currentURL: URL?\n    private var request: Task<Void, Never>?\n\n    init(imageView: UIImageView) { self.imageView = imageView }\n\n    func load(_ url: URL) {\n        cancel()\n        currentURL = url\n        imageView?.image = UIImage(systemName: \"photo\")\n        request = Task { [weak self] in\n            do {\n                let (data, response) = try await URLSession.shared.data(from: url)\n                try Task.checkCancellation()\n                guard let http = response as? HTTPURLResponse,\n                      (200..<300).contains(http.statusCode),\n                      let self, self.currentURL == url else { return }\n                self.imageView?.image = UIImage(data: data)\n            } catch {\n                // Keep the placeholder; cancellation is expected on reuse.\n            }\n        }\n    }\n\n    func cancel() {\n        currentURL = nil\n        request?.cancel()\n        request = nil\n        imageView?.image = UIImage(systemName: \"photo\")\n    }\n}",
+      "explanation": "Create one loader for the cell's image view and call cancel from prepareForReuse. The weak capture and post-await URL check prevent assigning an old request to a new model. For production, add bounded caching and prepare appropriately sized images off the main actor; this small example intentionally teaches lifecycle correctness rather than image-pipeline performance.",
+      "checks": [
+        "Load image A, immediately reconfigure for B, and ensure A never replaces B.",
+        "Reuse the cell before completion and verify the placeholder remains.",
+        "Navigate away and verify no request owns the image view strongly.",
+        "Explain where a cache key and thumbnail-size policy would be added."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "What does a successful response containing zero items represent?",
+      "options": [
+        "Always an authentication failure",
+        "An empty content state",
+        "A reason to retry forever",
+        "A decoding error"
+      ],
+      "answer": 1,
+      "explanation": "A valid empty collection is a meaningful success. Give it an explanation or creation action instead of presenting a network error."
+    },
+    {
+      "question": "Why is debounce alone insufficient for search correctness?",
+      "options": [
+        "It prevents all requests",
+        "Requests may still finish out of order",
+        "It changes every response ID",
+        "It disables cancellation"
+      ],
+      "answer": 1,
+      "explanation": "Debounce controls when requests start. A current-query or generation check controls which completed request is still allowed to update the screen."
+    },
+    {
+      "question": "When should a pagination cursor advance?",
+      "options": [
+        "Before making the request",
+        "After any failure",
+        "After accepting the successful page for the current dataset",
+        "Every time willDisplay is called"
+      ],
+      "answer": 2,
+      "explanation": "Advancing on failure can skip a page. Accept the response only if it still belongs to the active query, then commit its next cursor."
+    },
+    {
+      "question": "Why clear an image before beginning a new cell request?",
+      "options": [
+        "To remove stale content from the previously represented item",
+        "To guarantee the server responds faster",
+        "To avoid using stable identifiers",
+        "To force a new UUID"
+      ],
+      "answer": 0,
+      "explanation": "Reuse preserves the old image until you replace it. A placeholder immediately reflects that the newly represented item's image is not ready yet."
+    },
+    {
+      "question": "Which component should decide how an error state changes labels and list content?",
+      "options": [
+        "The URLSession delegate and every button separately",
+        "One screen rendering path driven by state",
+        "The JSON model's decoder",
+        "A random global notification"
+      ],
+      "answer": 1,
+      "explanation": "A single render path makes visual outcomes consistent and lets the state model be tested separately from UIKit."
+    }
+  ],
+  "pitfalls": [
+    "Using multiple independent booleans that permit contradictory screen states.",
+    "Treating empty success as an error.",
+    "Appending a page from an obsolete search query.",
+    "Starting duplicate next-page requests before setting the loading guard.",
+    "Assigning a downloaded image without validating current cell identity.",
+    "Stopping the refresh indicator only on success."
+  ],
+  "checkpoint": [
+    "Show initial loading, success, empty, and failure deliberately using a mock.",
+    "Explain what users see during refresh with existing content.",
+    "Prove an old query cannot append or replace newer results.",
+    "Merge overlapping pages without duplicate snapshot IDs.",
+    "Scroll rapidly while delayed images load and verify identity remains correct."
+  ],
+  "references": [
+    {
+      "title": "UIRefreshControl",
+      "url": "https://developer.apple.com/documentation/uikit/uirefreshcontrol"
+    },
+    {
+      "title": "UISearchController",
+      "url": "https://developer.apple.com/documentation/uikit/uisearchcontroller"
+    },
+    {
+      "title": "UITableViewDataSourcePrefetching",
+      "url": "https://developer.apple.com/documentation/uikit/uitableviewdatasourceprefetching"
+    },
+    {
+      "title": "URLCache",
+      "url": "https://developer.apple.com/documentation/foundation/urlcache"
+    }
+  ],
+  "capstone": {
+    "title": "PocketTasks milestone: resilient content screens",
+    "steps": [
+      "Drive the inbox from explicit state and render all terminal outcomes.",
+      "Add debounced search and invalidate pagination when its query changes.",
+      "Implement guarded next-page loading with stable-ID merging.",
+      "Use delayed mock responses to test refresh, cancellation, and stale-result behavior."
+    ]
+  }
+}

@@ -1,0 +1,237 @@
+{
+  "day": 6,
+  "title": "Navigation and communication between screens",
+  "subtitle": "Make push, presentation, saving, cancellation, and containment behave deliberately.",
+  "phase": "Foundations",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Choose navigation stacks, tabs, and modal presentations by user intent.",
+    "Pass data forward and return changes through callbacks or delegates.",
+    "Keep cancellation separate from saving an edited draft.",
+    "Use the required view-controller containment sequence."
+  ],
+  "prerequisites": [
+    "Days 2–5: ownership, lifecycle, layout, and form input.",
+    "A UIKit app with a UINavigationController at the scene root.",
+    "Understand that copying a value can represent an isolated editing draft."
+  ],
+  "sections": [
+    {
+      "title": "Use containers to express the app's structure",
+      "body": [
+        "UINavigationController manages a stack: pushing moves deeper into a hierarchy and popping returns to the previous screen. The navigation bar reflects the top controller's title and items. UITabBarController switches between peer destinations such as Tasks and Settings; each tab can own its own navigation stack. Do not use a tab for a one-time action such as Save.",
+        "A modal presentation begins a focused flow, such as adding a task or selecting a filter. Dismissal returns to the presenting context. A screen presented modally is not automatically inside a navigation controller, so wrap it in one if it needs a navigation bar with Save and Cancel. Decide whether the user is moving deeper into content or temporarily entering a task, then choose the container that communicates that relationship."
+      ]
+    },
+    {
+      "title": "Pass required data at construction time",
+      "body": [
+        "If a detail screen cannot function without an identifier or task value, require that input in its initializer for programmatic construction. This makes an invalid unconfigured screen harder to create. Storyboard-based screens often receive data before the segue finishes; document that configuration point and avoid force-unwrapped properties that fail much later during view loading.",
+        "Pass a model value or stable identifier, not a UILabel copied from the source screen. Views belong to a hierarchy; domain data belongs to the feature. A value draft is useful for editing: changing the draft does not immediately mutate the list's displayed source. On Save, return the validated result; on Cancel or Back, discard the draft. Preserve the task's stable identifier when editing rather than treating every save as a new entity."
+      ]
+    },
+    {
+      "title": "Return changes through an explicit contract",
+      "body": [
+        "A closure works well for one or two simple results such as onSave(TaskItem). A delegate protocol works well for a named multi-event relationship that benefits from a documented contract. Notifications fit broad observations where the sender should not know every observer, but are usually harder to trace than a direct callback for one parent-child edit flow.",
+        "Pay attention to ownership. A parent may retain or present an editor, so a callback stored by the editor should normally capture the parent weakly. A child delegate pointing to the owning parent should be weak and class-bound. UI callbacks should execute on the main actor; do not let a background notification or service callback directly mutate UIKit. Make the result contract tell callers whether the value was merely edited, validated, or actually persisted."
+      ]
+    },
+    {
+      "title": "Presentation has its own lifecycle and cancellation rules",
+      "body": [
+        "Modern sheet presentations can have detents and may be dismissed interactively. A Cancel button is only one path out of a modal. Decide whether an unsaved draft may be discarded by swiping, whether you need a dismissal delegate to ask about changes, or whether a critical flow should temporarily prevent interactive dismissal with isModalInPresentation. Do not block dismissal reflexively for every form.",
+        "Use the correct inverse operation: pop a pushed controller; dismiss a presented controller or its presentation container. Calling popViewController on a modal that has no navigation controller does nothing. Avoid triggering a new presentation repeatedly from appearance callbacks. Wait for the current transition to complete when coordinating multi-step navigation, and keep route decisions in one clear place as the app grows."
+      ]
+    },
+    {
+      "title": "Child controllers need full containment",
+      "body": [
+        "Adding another controller's view as a subview does not establish proper controller containment. A custom container should call addChild, insert and constrain the child's view, then call child.didMove(toParent:). This informs UIKit about the relationship so lifecycle forwarding and other behavior can work correctly.",
+        "To remove a child, call willMove(toParent: nil), remove its view, and call removeFromParent. The latter completes the parent-removal relationship. Do not use custom containment when a standard navigation or tab controller already matches the design. Coordinators can later centralize navigation policy; they are a way to organize responsibilities, not a requirement for every two-screen app."
+      ]
+    }
+  ],
+  "example": {
+    "title": "Edit a title, save it back, or cancel with Back",
+    "filename": "Day06Navigation.swift",
+    "code": "import UIKit\n\n@MainActor\nfinal class TaskHomeViewController: UIViewController {\n    private var taskTitle = \"Practice navigation\"\n    private let titleLabel = UILabel()\n\n    override func viewDidLoad() {\n        super.viewDidLoad()\n        title = \"PocketTasks\"\n        view.backgroundColor = .systemBackground\n        titleLabel.text = taskTitle\n        titleLabel.font = .preferredFont(forTextStyle: .title2)\n        titleLabel.adjustsFontForContentSizeCategory = true\n        titleLabel.numberOfLines = 0\n        titleLabel.textAlignment = .center\n        titleLabel.translatesAutoresizingMaskIntoConstraints = false\n        view.addSubview(titleLabel)\n        NSLayoutConstraint.activate([\n            titleLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),\n            titleLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),\n            titleLabel.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor)\n        ])\n        navigationItem.rightBarButtonItem = UIBarButtonItem(\n            title: \"Edit\", primaryAction: UIAction { [weak self] _ in\n                self?.showEditor()\n            }\n        )\n    }\n\n    private func showEditor() {\n        let editor = TaskTitleEditorViewController(initialTitle: taskTitle)\n        editor.onSave = { [weak self] newTitle in\n            self?.taskTitle = newTitle\n            self?.titleLabel.text = newTitle\n        }\n        navigationController?.pushViewController(editor, animated: true)\n    }\n}\n\n@MainActor\nfinal class TaskTitleEditorViewController: UIViewController {\n    var onSave: (@MainActor (String) -> Void)?\n    private let initialTitle: String\n    private let field = UITextField()\n    private let errorLabel = UILabel()\n\n    init(initialTitle: String) {\n        self.initialTitle = initialTitle\n        super.init(nibName: nil, bundle: nil)\n    }\n\n    required init?(coder: NSCoder) {\n        fatalError(\"Use init(initialTitle:) for this programmatic example\")\n    }\n\n    override func viewDidLoad() {\n        super.viewDidLoad()\n        title = \"Edit title\"\n        view.backgroundColor = .systemBackground\n        field.text = initialTitle\n        field.borderStyle = .roundedRect\n        field.accessibilityLabel = \"Task title\"\n        field.font = .preferredFont(forTextStyle: .body)\n        field.adjustsFontForContentSizeCategory = true\n        errorLabel.textColor = .systemRed\n        errorLabel.numberOfLines = 0\n        let stack = UIStackView(arrangedSubviews: [field, errorLabel])\n        stack.axis = .vertical\n        stack.spacing = 12\n        stack.translatesAutoresizingMaskIntoConstraints = false\n        view.addSubview(stack)\n        NSLayoutConstraint.activate([\n            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),\n            stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),\n            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),\n            field.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)\n        ])\n        navigationItem.rightBarButtonItem = UIBarButtonItem(\n            title: \"Save\", primaryAction: UIAction { [weak self] _ in\n                self?.save()\n            }\n        )\n    }\n\n    private func save() {\n        let clean = (field.text ?? \"\").trimmingCharacters(in: .whitespacesAndNewlines)\n        guard !clean.isEmpty, clean.count <= 80 else {\n            errorLabel.text = \"Enter a title between 1 and 80 characters.\"\n            return\n        }\n        onSave?(clean)\n        navigationController?.popViewController(animated: true)\n    }\n}",
+    "walkthrough": [
+      "Add both classes to the UIKit target and set the scene root to UINavigationController(rootViewController: TaskHomeViewController()). The initializer is programmatic; this editor is not designed for storyboard decoding.",
+      "Tap Edit. The current title is passed by value through the editor's initializer, so the original screen has valid data before editing begins.",
+      "Change the text and tap Back. Nothing calls onSave, so the original title remains unchanged.",
+      "Edit again and tap Save. Validation succeeds, the callback updates the parent, and the editor pops itself.",
+      "The callback captures the parent weakly. This example updates in-memory screen state only; saving to a repository and handling failure will be added later."
+    ],
+    "expectedOutput": "A task title with an Edit button. Back discards edits; Save updates the original title and returns. Empty or overlong titles show inline feedback and do not leave the editor."
+  },
+  "exercises": [
+    {
+      "id": "d06-warmup",
+      "title": "Create two peer tabs",
+      "difficulty": "Warm-up",
+      "prompt": "Write a function that creates a tab bar with Tasks and Settings destinations, each using its own navigation controller.",
+      "requirements": [
+        "Use separate controller instances.",
+        "Give each tab a title and SF Symbol.",
+        "Do not use a tab item as a Save action."
+      ],
+      "starterCode": "@MainActor\nfunc makeRootTabs() -> UITabBarController {\n    // Build roots\n}",
+      "hints": [
+        "A navigation controller is itself a view controller.",
+        "Configure each navigation controller's tabBarItem."
+      ],
+      "solution": "import UIKit\n\n@MainActor\nfunc makeRootTabs() -> UITabBarController {\n    let tasks = TaskHomeViewController()\n    let settings = UIViewController()\n    settings.title = \"Settings\"\n    settings.view.backgroundColor = .systemBackground\n\n    let taskNav = UINavigationController(rootViewController: tasks)\n    taskNav.tabBarItem = UITabBarItem(\n        title: \"Tasks\", image: UIImage(systemName: \"checklist\"), tag: 0\n    )\n    let settingsNav = UINavigationController(rootViewController: settings)\n    settingsNav.tabBarItem = UITabBarItem(\n        title: \"Settings\", image: UIImage(systemName: \"gearshape\"), tag: 1\n    )\n    let tabs = UITabBarController()\n    tabs.viewControllers = [taskNav, settingsNav]\n    return tabs\n}",
+      "explanation": "Each tab preserves its own stack while the user switches peer destinations. Use this function's return value as the scene window's root controller; do not wrap the entire tab controller in another unnecessary navigation stack.",
+      "checks": [
+        "Each tab has its own navigation bar.",
+        "Switching tabs does not create a new root each time.",
+        "Editing in Tasks does not push a screen onto Settings."
+      ]
+    },
+    {
+      "id": "d06-core",
+      "title": "Present a cancellable sheet",
+      "difficulty": "Core",
+      "prompt": "Create a simple help controller and present it as a sheet inside a navigation controller. Provide a Done button that dismisses the presented flow.",
+      "requirements": [
+        "Use dismiss rather than pop for the modal flow.",
+        "Support medium and large detents.",
+        "Avoid retaining the controller through its own stored action."
+      ],
+      "starterCode": "@MainActor\nfunc showHelp(from presenter: UIViewController) {\n    // Present modal navigation flow\n}",
+      "hints": [
+        "Configure the sheet on the presented navigation controller.",
+        "The controller's navigation bar can hold a Done UIAction."
+      ],
+      "solution": "import UIKit\n\n@MainActor\nfunc showHelp(from presenter: UIViewController) {\n    let help = UIViewController()\n    help.title = \"How PocketTasks works\"\n    help.view.backgroundColor = .systemBackground\n    help.navigationItem.rightBarButtonItem = UIBarButtonItem(\n        title: \"Done\", primaryAction: UIAction { [weak help] _ in\n            help?.dismiss(animated: true)\n        }\n    )\n    let navigation = UINavigationController(rootViewController: help)\n    navigation.modalPresentationStyle = .pageSheet\n    if let sheet = navigation.sheetPresentationController {\n        sheet.detents = [.medium(), .large()]\n        sheet.prefersGrabberVisible = true\n    }\n    presenter.present(navigation, animated: true)\n}",
+      "explanation": "The navigation controller is presented modally, so dismiss ends the flow. This help screen has no unsaved state, making interactive dismissal reasonable. Add content as an extension exercise; the solution focuses on presentation behavior.",
+      "checks": [
+        "The sheet displays a navigation bar and Done item.",
+        "Done returns to the original presenter.",
+        "Dragging to the large detent does not create another controller."
+      ]
+    },
+    {
+      "id": "d06-stretch",
+      "title": "Implement correct child containment",
+      "difficulty": "Stretch",
+      "prompt": "Write a helper that embeds a child controller inside a dedicated container view belonging to the parent, and a helper that removes it.",
+      "requirements": [
+        "Use addChild and didMove(toParent:).",
+        "Constrain the child view to all container edges.",
+        "Use the correct removal sequence."
+      ],
+      "starterCode": "@MainActor\nfunc embed(_ child: UIViewController, in container: UIView, parent: UIViewController) {\n    // Containment\n}",
+      "hints": [
+        "The container must already be in the parent's view hierarchy.",
+        "removeFromParent completes the parent-removal operation."
+      ],
+      "solution": "import UIKit\n\n@MainActor\nfunc embed(_ child: UIViewController,\n           in container: UIView,\n           parent: UIViewController) {\n    precondition(child.parent == nil, \"Child already belongs to a parent\")\n    parent.addChild(child)\n    child.view.translatesAutoresizingMaskIntoConstraints = false\n    container.addSubview(child.view)\n    NSLayoutConstraint.activate([\n        child.view.topAnchor.constraint(equalTo: container.topAnchor),\n        child.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),\n        child.view.trailingAnchor.constraint(equalTo: container.trailingAnchor),\n        child.view.bottomAnchor.constraint(equalTo: container.bottomAnchor)\n    ])\n    child.didMove(toParent: parent)\n}\n\n@MainActor\nfunc removeEmbedded(_ child: UIViewController) {\n    child.willMove(toParent: nil)\n    child.view.removeFromSuperview()\n    child.removeFromParent()\n}",
+      "explanation": "Controller ownership and view hierarchy must agree. Merely inserting child.view skips the relationship UIKit uses for appearance forwarding and other container behavior. Use standard containers unless a custom one is actually required.",
+      "checks": [
+        "The child's parent property is the expected controller after embedding.",
+        "The child fills the container when it resizes.",
+        "After removal, the child has no parent and its view has no superview."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "Which operation usually reverses a push?",
+      "options": [
+        "dismiss.",
+        "popViewController.",
+        "removeFromSuperview alone.",
+        "Switching the root window."
+      ],
+      "answer": 1,
+      "explanation": "A navigation controller owns the stack and pops the top pushed controller."
+    },
+    {
+      "question": "Why pass an editing draft as a value?",
+      "options": [
+        "It automatically persists changes.",
+        "It separates tentative edits from committed source data.",
+        "It avoids all validation.",
+        "It prevents using delegates."
+      ],
+      "answer": 1,
+      "explanation": "The caller can commit on Save and discard on Cancel without leaking partial edits into the original data."
+    },
+    {
+      "question": "A child editor stores a callback that updates its parent. What capture is usually appropriate?",
+      "options": [
+        "A strong capture with no ownership analysis.",
+        "A weak parent capture when the parent owns or presents the editor.",
+        "An unowned capture because callbacks never outlive screens.",
+        "A global variable."
+      ],
+      "answer": 1,
+      "explanation": "The weak backward reference avoids forming an ownership cycle and safely handles a vanished parent."
+    },
+    {
+      "question": "What does a modal editor need if it should show a navigation bar?",
+      "options": [
+        "Nothing; every modal has one automatically.",
+        "A UINavigationController wrapper or another intentional container.",
+        "A second UIApplication.",
+        "A main storyboard."
+      ],
+      "answer": 1,
+      "explanation": "A plain UIViewController does not automatically receive a navigation bar when presented."
+    },
+    {
+      "question": "Which is the correct addition sequence for custom containment?",
+      "options": [
+        "Add the view only.",
+        "didMove, then addChild, then remove the view.",
+        "addChild, add/constrain the child's view, then didMove(toParent:).",
+        "Set child.parent directly."
+      ],
+      "answer": 2,
+      "explanation": "This sequence establishes the controller relationship and its view hierarchy with the required lifecycle notification."
+    }
+  ],
+  "pitfalls": [
+    "Using pop for a modal or dismiss for an ordinary pushed detail can produce confusing behavior.",
+    "Passing UIKit views as data entangles screen hierarchies.",
+    "A strong callback to an owning parent can retain the whole flow.",
+    "Interactive sheet dismissal is a cancellation path that needs an explicit unsaved-draft policy.",
+    "Adding a child controller's view without containment skips essential UIKit relationships."
+  ],
+  "checkpoint": [
+    "Explain why a feature uses push, tab, or modal presentation.",
+    "Demonstrate Save versus Back cancellation without accidental mutation.",
+    "Show the ownership graph of a parent, editor, and callback.",
+    "Embed and remove a child using the full sequence.",
+    "State whether a returned edit is merely validated or durably saved."
+  ],
+  "references": [
+    {
+      "title": "Apple — UINavigationController",
+      "url": "https://developer.apple.com/documentation/uikit/uinavigationcontroller"
+    },
+    {
+      "title": "Apple — UITabBarController",
+      "url": "https://developer.apple.com/documentation/uikit/uitabbarcontroller"
+    },
+    {
+      "title": "Apple — UISheetPresentationController",
+      "url": "https://developer.apple.com/documentation/uikit/uisheetpresentationcontroller"
+    },
+    {
+      "title": "Apple — Implementing a container view controller",
+      "url": "https://developer.apple.com/library/archive/featuredarticles/ViewControllerPGforiPhoneOS/ImplementingaContainerViewController.html"
+    }
+  ],
+  "capstone": {
+    "title": "Connect list, editor, and settings",
+    "steps": [
+      "Create a task-list root and push a task editor with required input.",
+      "Return a validated draft through a weakly captured callback.",
+      "Keep Back and Cancel from mutating source data.",
+      "Add Settings as a peer tab only if it is a genuine destination, and document modal dismissal behavior."
+    ]
+  }
+}

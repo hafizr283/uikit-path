@@ -1,0 +1,241 @@
+{
+  "day": 20,
+  "title": "Professional delivery & codebase readiness",
+  "subtitle": "Turn a working app into a reproducible, reviewable release.",
+  "phase": "Ship with confidence",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Explain targets, schemes, build configurations, and package dependencies.",
+    "Build and test the project reproducibly from the command line.",
+    "Understand signing, archives, TestFlight, and the release-review boundary.",
+    "Prepare a reviewable change with safe diagnostics and explicit release evidence."
+  ],
+  "prerequisites": [
+    "Day 13: composition roots and dependency boundaries.",
+    "Day 16: meaningful tests.",
+    "Day 17: profiling and crash investigation.",
+    "Day 18: accessibility and localization checks."
+  ],
+  "sections": [
+    {
+      "title": "1. Know what Xcode is building",
+      "body": [
+        "A target defines a product and the sources, resources, dependencies, and settings used to build it. A scheme selects targets and configurations for actions such as Run, Test, Profile, and Archive. Debug and Release are build configurations; they are not separate applications unless you define different bundle identifiers or targets. If a file is visible in Xcode but absent from the target's sources or resources, it may not be included in the app.",
+        "Share the scheme in source control so another developer and CI can select the same build. Keep environment-specific configuration explicit through build settings or xcconfig files, and validate required values at startup. A staging API URL is configuration; a production signing credential is a secret. Do not put confidential service credentials into an iOS app merely because the value is loaded from an Info.plist or xcconfig file. A shipped client can be inspected."
+      ]
+    },
+    {
+      "title": "2. Make dependencies and changes reviewable",
+      "body": [
+        "Swift Package Manager can attach packages and products to the appropriate targets. Evaluate a dependency's maintenance, license, supported platforms, API surface, and necessity before adding it. Keep resolved package versions under the repository's intended policy so CI and teammates can reproduce builds. Do not commit DerivedData, local user settings, simulator data, or signing secrets.",
+        "A useful pull request describes the user-visible problem, the resulting behavior, and the evidence that supports it. Keep unrelated formatting or architectural rewrites out of a focused fix. Review error handling, cancellation, ownership, accessibility, data migration, and privacy as applicable to the change. A screenshot proves one visual state; a test proves the behavior it actually asserts. State what was not tested instead of expanding either into a blanket quality claim."
+      ]
+    },
+    {
+      "title": "3. Separate simulator validation from release signing",
+      "body": [
+        "The simulator can build and run UIKit apps without a physical-device provisioning profile. A device or distributable archive requires the correct bundle identifier, team, certificates, capabilities, and provisioning arrangement. Automatic signing can manage parts of this for an authorized Apple developer account, but it does not remove the need for matching entitlements and access. Keep signing material in the approved developer account or CI secret system.",
+        "Create an archive using the Release configuration and a device destination, inspect it in Organizer, and use the supported distribution workflow. TestFlight adds an installable distribution stage where testers can exercise the real signed build. It is separate from App Store submission and approval. Before sending a build, verify version and build numbers, supported OS versions, privacy declarations, required usage strings, icons, screenshots, account access for review where needed, and the behavior of the actual release configuration."
+      ]
+    },
+    {
+      "title": "4. Automate evidence, not unchecked publishing",
+      "body": [
+        "A CI job should start from a clean checkout, select a known Xcode environment, resolve dependencies, and run meaningful build and test commands. Store test-result bundles and logs that help diagnose failure. Make the job fail when a build or test fails; a shell pipeline that discards an exit code can produce a misleading green badge. Do not skip failing tests merely to get a release artifact.",
+        "Start with unsigned simulator builds and tests. Add archive and distribution automation only after the team has a clear signing and release policy. Protect release credentials and use narrow permissions. A course repository can provide a macOS build workflow, but its presence is not proof that it ran successfully. Inspect the actual CI result and download the evidence when investigating failures. Reproducibility includes the toolchain and destination, not just the source commit."
+      ]
+    },
+    {
+      "title": "5. Prepare to maintain what you ship",
+      "body": [
+        "A release is the beginning of maintenance. Use minimal structured diagnostics, retain matching symbols for crashes, and connect issues to the deployed version. Do not log tokens, passwords, complete request bodies, or user documents. If you use third-party analytics or crash reporting, understand what it collects and ensure the app's privacy disclosures and consent behavior match the actual integration.",
+        "For PocketTasks, perform a final user journey: first launch, create/edit/complete a task, relaunch and verify persistence, recover from a failed load, navigate with VoiceOver, use large text, and exercise the selected platform integrations. Record remaining limitations such as mock authentication or an unimplemented synchronization service. Twenty days gives you a structured foundation; your next growth step is maintaining this app through a real feature change, a migration, and a bug investigation while preserving the tests and user experience."
+      ]
+    }
+  ],
+  "example": {
+    "title": "A repeatable simulator validation script",
+    "filename": "validate-ios.sh",
+    "code": "#!/usr/bin/env bash\nset -euo pipefail\n\n# Run on a Mac with Xcode selected.\n# First inspect: xcrun simctl list devices available\n# Then: SIMULATOR_UDID=<available-device-uuid> bash validate-ios.sh\n: \"${SIMULATOR_UDID:?Set an available iOS simulator UUID}\"\n\nPROJECT=\"native/PocketTasks/PocketTasks.xcodeproj\"\nSCHEME=\"PocketTasks\"\nBUILD_ROOT=\"${BUILD_ROOT:-.build/ios-validation}\"\nmkdir -p \"$BUILD_ROOT\"\n\nxcodebuild -version\nxcodebuild -list -project \"$PROJECT\"\n\nxcodebuild build \\\n  -project \"$PROJECT\" \\\n  -scheme \"$SCHEME\" \\\n  -configuration Debug \\\n  -sdk iphonesimulator \\\n  -destination \"generic/platform=iOS Simulator\" \\\n  -derivedDataPath \"$BUILD_ROOT/DerivedData\" \\\n  CODE_SIGNING_ALLOWED=NO\n\nxcodebuild test \\\n  -project \"$PROJECT\" \\\n  -scheme \"$SCHEME\" \\\n  -configuration Debug \\\n  -destination \"platform=iOS Simulator,id=$SIMULATOR_UDID\" \\\n  -derivedDataPath \"$BUILD_ROOT/DerivedData\" \\\n  -resultBundlePath \"$BUILD_ROOT/TestResults-$(date +%Y%m%d%H%M%S).xcresult\" \\\n  CODE_SIGNING_ALLOWED=NO",
+    "walkthrough": [
+      "Save this as validate-ios.sh at the repository root on your Mac. The path assumes the accompanying native/PocketTasks project; adjust it for another checkout.",
+      "Use xcrun simctl list devices available and choose an installed iOS simulator UUID. Supplying a destination avoids assuming that every Xcode installation has the same device name.",
+      "The generic simulator build checks that the app compiles; the test action runs the shared scheme's tests on the concrete simulator.",
+      "set -euo pipefail preserves failure. No log-formatting pipeline is used here, so xcodebuild's result remains directly visible.",
+      "The script creates local build artifacts and a uniquely named result bundle. Add .build to .gitignore. It does not sign, archive for devices, upload to TestFlight, or submit an App Store release."
+    ],
+    "expectedOutput": "On a Mac with a compatible Xcode and installed simulator, the script exits successfully only if both build and test actions succeed. A .xcresult bundle remains available for inspection."
+  },
+  "exercises": [
+    {
+      "id": "20-warmup",
+      "title": "Validate environment configuration",
+      "difficulty": "Warm-up",
+      "prompt": "Read an API_BASE_URL string from an injected configuration dictionary and reject missing or non-HTTPS values. Keep this separate from the live Bundle so tests can supply fixtures.",
+      "requirements": [
+        "Require a nonempty host and HTTPS.",
+        "Reject embedded credentials, a query string, and a fragment.",
+        "Return a typed configuration or a specific error.",
+        "Do not hard-code a production secret."
+      ],
+      "starterCode": "import Foundation\nenum ConfigurationError: Error { case invalidBaseURL }\nstruct AppConfiguration {\n    let apiBaseURL: URL\n    init(values: [String: String]) throws {\n        // Validate API_BASE_URL.\n        throw ConfigurationError.invalidBaseURL\n    }\n}",
+      "hints": [
+        "Construct URLComponents to inspect the parsed URL.",
+        "Validation should fail early instead of silently choosing a production default."
+      ],
+      "solution": "import Foundation\n\nenum ConfigurationError: Error {\n    case invalidBaseURL\n}\n\nstruct AppConfiguration {\n    let apiBaseURL: URL\n\n    init(values: [String: String]) throws {\n        guard let raw = values[\"API_BASE_URL\"],\n              let parts = URLComponents(string: raw),\n              parts.scheme?.lowercased() == \"https\",\n              let host = parts.host, !host.isEmpty,\n              parts.user == nil, parts.password == nil,\n              parts.query == nil, parts.fragment == nil,\n              let url = parts.url else {\n            throw ConfigurationError.invalidBaseURL\n        }\n        apiBaseURL = url\n    }\n}",
+      "explanation": "Injecting a dictionary keeps parsing deterministic. Configuration validation is separate from a credential-origin allowlist: an app that attaches tokens must still enforce the trusted server boundary from Day 15. A configured URL is public client configuration, not a secret.",
+      "checks": [
+        "A valid HTTPS fixture URL is accepted.",
+        "Missing, HTTP, credential-bearing, and query-bearing values are rejected.",
+        "The parser can be tested without editing the app's Info.plist."
+      ]
+    },
+    {
+      "id": "20-core",
+      "title": "Create diagnostics that cannot accept a raw token",
+      "difficulty": "Core",
+      "prompt": "Define a tiny network logging API that accepts a known operation, status code, and duration. Its public interface should have no parameter for an Authorization header, request body, or arbitrary URL.",
+      "requirements": [
+        "Use structured Logger output.",
+        "Represent operations with a small enum.",
+        "Clamp negative elapsed values or otherwise define the invalid-input behavior.",
+        "Keep the logging helper out of model business logic."
+      ],
+      "starterCode": "import Foundation\nimport os\n\nenum NetworkOperation: String {\n    case fetchTasks, saveTask\n}\n// Add a logger that accepts only safe operational fields.",
+      "hints": [
+        "Restricting the API makes accidental sensitive logging harder.",
+        "An operation name identifies a route category without exposing a complete URL."
+      ],
+      "solution": "import Foundation\nimport os\n\nenum NetworkOperation: String {\n    case fetchTasks\n    case saveTask\n}\n\nstruct NetworkDiagnostics {\n    private let logger = Logger(\n        subsystem: \"com.example.PocketTasks\",\n        category: \"network\"\n    )\n\n    func completed(\n        operation: NetworkOperation,\n        status: Int,\n        elapsedSeconds: Double\n    ) {\n        let duration = elapsedSeconds.isFinite\n            ? max(0, elapsedSeconds) : 0\n        logger.info(\n            \"operation=\\(operation.rawValue, privacy: .public) status=\\(status) seconds=\\(duration)\"\n        )\n    }\n}",
+      "explanation": "This helper accepts only a known operation and numeric diagnostics. It reduces opportunities for accidentally dumping a request, though the team still needs a broader logging policy. Public operation names are intentionally non-sensitive; real user identifiers should not be added casually.",
+      "checks": [
+        "The API cannot be called with a token or arbitrary URL parameter.",
+        "A negative or non-finite duration has a defined sanitized value.",
+        "The log contains operation, status, and duration without request contents."
+      ]
+    },
+    {
+      "id": "20-stretch",
+      "title": "Write a simulator CI job that preserves failures",
+      "difficulty": "Stretch",
+      "prompt": "Create a GitHub Actions job that checks out the repository and builds the shared PocketTasks scheme on macOS. Explain what is still needed before it can act as a release gate.",
+      "requirements": [
+        "Use a macOS runner and a simulator SDK.",
+        "Give the workflow read-only repository permissions.",
+        "Do not introduce signing credentials for a simulator build.",
+        "Fail on xcodebuild errors."
+      ],
+      "starterCode": "name: iOS build\non: [push, pull_request]\n# Add a read-only macOS build job.",
+      "hints": [
+        "The generic simulator destination does not require a specific installed device name.",
+        "A build-only check does not execute tests or validate signing."
+      ],
+      "solution": "name: iOS build\non: [push, pull_request]\npermissions:\n  contents: read\n\njobs:\n  build:\n    runs-on: macos-15\n    steps:\n      - uses: actions/checkout@v4\n      - name: Show selected toolchain\n        run: xcodebuild -version\n      - name: Build UIKit app\n        shell: bash\n        run: |\n          set -euo pipefail\n          xcodebuild build \\\n            -project native/PocketTasks/PocketTasks.xcodeproj \\\n            -scheme PocketTasks \\\n            -configuration Debug \\\n            -sdk iphonesimulator \\\n            -destination \"generic/platform=iOS Simulator\" \\\n            -derivedDataPath .build/DerivedData \\\n            CODE_SIGNING_ALLOWED=NO",
+      "explanation": "This is a minimal compile gate, not a complete release pipeline. Add tests on an available simulator, preserve result bundles, select a team-supported Xcode version, and check the release configuration. Signed archives, privacy review, and distribution credentials require separate deliberate setup.",
+      "checks": [
+        "A compilation error makes the job fail.",
+        "The workflow contains no token, certificate, or provisioning profile.",
+        "Its documentation calls it a build check rather than an App Store release."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "What does an Xcode scheme determine?",
+      "options": [
+        "Only the app icon",
+        "Which targets and configurations actions such as Run and Test use",
+        "The user's Apple ID password",
+        "The contents of every API response"
+      ],
+      "answer": 1,
+      "explanation": "Schemes connect buildable targets to actions and configurations and should be shared for CI."
+    },
+    {
+      "question": "Does a successful unsigned simulator build prove App Store readiness?",
+      "options": [
+        "Yes, all signing is automatic",
+        "No; signing, release behavior, distribution, and review requirements remain",
+        "Yes, if the app uses UIKit",
+        "Only if the repository is public"
+      ],
+      "answer": 1,
+      "explanation": "Simulator compilation is useful evidence with a limited scope."
+    },
+    {
+      "question": "Which item should generally stay out of source control?",
+      "options": [
+        "Shared schemes",
+        "Tests",
+        "DerivedData and signing secrets",
+        "Source files"
+      ],
+      "answer": 2,
+      "explanation": "Generated local build output and private signing material do not belong in the normal source repository."
+    },
+    {
+      "question": "What makes a useful pull-request validation statement?",
+      "options": [
+        "A blanket claim that everything works",
+        "Specific checks and results with material limits",
+        "Only the number of lines changed",
+        "A screenshot presented as proof of all behavior"
+      ],
+      "answer": 1,
+      "explanation": "Reviewers need concrete evidence and its scope to assess the change."
+    },
+    {
+      "question": "Why preserve the matching archive and symbols for a released build?",
+      "options": [
+        "To change the user's locale",
+        "To interpret and symbolize crash reports from that build",
+        "To bypass authorization",
+        "To enable infinite background execution"
+      ],
+      "answer": 1,
+      "explanation": "Matching symbols connect release crash addresses to meaningful code locations."
+    }
+  ],
+  "pitfalls": [
+    "A local unshared scheme may work for one developer but be invisible to CI.",
+    "Putting a secret into an xcconfig does not make it safe to ship in the app.",
+    "A green compile job is not proof that tests ran.",
+    "A staging build may hide a broken Release configuration.",
+    "Passing TestFlight installation does not mean the App Store review is complete."
+  ],
+  "checkpoint": [
+    "Explain the project's app target, test target, shared scheme, and configurations.",
+    "Run a clean simulator build and the relevant test suite on your Mac.",
+    "Write a pull-request description with concrete behavior and validation.",
+    "Check release configuration, privacy strings, and known product limitations.",
+    "Prepare a follow-up roadmap based on real gaps rather than claiming mastery after twenty days."
+  ],
+  "references": [
+    {
+      "title": "Apple: Building and running an app",
+      "url": "https://developer.apple.com/documentation/xcode/building-and-running-an-app"
+    },
+    {
+      "title": "Apple: Distributing your app for beta testing and releases",
+      "url": "https://developer.apple.com/documentation/xcode/distributing-your-app-for-beta-testing-and-releases"
+    },
+    {
+      "title": "Apple: Adding package dependencies to your app",
+      "url": "https://developer.apple.com/documentation/xcode/adding-package-dependencies-to-your-app"
+    },
+    {
+      "title": "Apple: App privacy details",
+      "url": "https://developer.apple.com/app-store/app-privacy-details/"
+    }
+  ],
+  "capstone": {
+    "title": "Prepare a reviewable PocketTasks handoff",
+    "steps": [
+      "Run and record the available build, unit-test, UI-test, accessibility, and persistence checks.",
+      "Document setup, architecture, supported iOS version, and which integrations are fixtures.",
+      "Create a focused release checklist and a known-limitations section without claiming production auth or sync is complete.",
+      "On your authorized Apple account, create and inspect a signed archive; proceed to TestFlight only when the release setup and checks are ready."
+    ]
+  }
+}

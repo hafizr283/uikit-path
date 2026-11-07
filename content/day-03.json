@@ -1,0 +1,236 @@
+{
+  "day": 3,
+  "title": "UIKit, scenes, and view-controller lifecycles",
+  "subtitle": "Know how an iOS app reaches the screen and where each responsibility belongs.",
+  "phase": "Foundations",
+  "duration": "3–4 hours",
+  "objectives": [
+    "Trace an app from application launch to a scene, window, and root controller.",
+    "Distinguish one-time view setup from repeated appearance and layout callbacks.",
+    "Understand view hierarchy, responder chain, and main-actor UI access.",
+    "Work with Storyboards, XIBs, and programmatic UIKit without mixing entry points accidentally."
+  ],
+  "prerequisites": [
+    "Days 1–2: classes, closures, and ownership.",
+    "A Mac with Xcode and an iOS app target using UIKit; the web preview cannot execute the native lifecycle."
+  ],
+  "sections": [
+    {
+      "title": "Application, scene, window, controller, view",
+      "body": [
+        "UIApplication represents the running app process. AppDelegate handles application-level coordination. A UIScene represents one instance of the app's UI; a UIWindowScene connects windows to that scene. A UIWindow hosts a root view controller, which manages a view hierarchy. Keep these levels separate: the process can outlive a particular UI scene, and apps can support multiple scenes.",
+        "With the scene lifecycle, scene-specific UI work belongs in SceneDelegate rather than treating AppDelegate as the owner of one universal window. A root UINavigationController is a common entry point for an app with a list and detail screens. Retain the UIWindow in a property: a local variable alone does not express the scene delegate's ownership. The scene connection receives a general UIScene, so verify that it is a UIWindowScene before constructing the window."
+      ]
+    },
+    {
+      "title": "View loading is not the same as visibility",
+      "body": [
+        "A view controller can exist before its view is loaded. Accessing view or calling loadViewIfNeeded() triggers loading when necessary. loadView creates the root view; override it when you intentionally supply a custom root view, and assign self.view. viewDidLoad follows loading and is the usual home for one-time control creation, constraint installation, and event wiring for that view instance.",
+        "viewWillAppear and viewDidAppear relate to appearance and may run repeatedly as navigation, tabs, or presentations change. viewWillDisappear and viewDidDisappear relate to leaving the visible hierarchy; disappearance does not necessarily mean permanent destruction. Call super in lifecycle overrides. Do not start the same observer or install the same constraints on every appearance without a corresponding lifecycle design. Use deinit for ownership diagnosis, not as a substitute for all visibility handling."
+      ]
+    },
+    {
+      "title": "Layout can repeat many times",
+      "body": [
+        "Auto Layout and UIKit can perform layout when the window changes size, text changes, traits change, or constraints are invalidated. viewDidLayoutSubviews therefore may run many times. It is appropriate for geometry-dependent adjustments that cannot be expressed directly with constraints, but it should not repeatedly fetch data, recreate the whole interface, or append subviews.",
+        "Before layout, a view's bounds may not match its final display size. Do not save a frame from viewDidLoad and assume it stays valid after rotation or split-screen resizing. In this first example, a label uses an autoresizing mask to fill its container; tomorrow you will replace fixed geometry assumptions with constraints. Learning when sizes are valid makes Auto Layout failures much easier to understand."
+      ]
+    },
+    {
+      "title": "Events travel through responders, UI stays on the main actor",
+      "body": [
+        "Views, view controllers, and the application participate in a responder chain. A text field can become first responder to receive keyboard input, and an action can be routed to an appropriate responder instead of requiring every sender to know every receiver. View hierarchy describes visual containment; responder chain describes an event-routing relationship. They are related but not identical diagrams.",
+        "UIKit view work belongs on the main actor. An @MainActor controller makes that isolation explicit in Swift code. Concurrency does not mean moving a view controller to a background thread: background or asynchronous work should produce data, then the UI applies that data on its required actor. Day 10 covers task isolation in depth. For now, recognize that lifecycle methods and control actions are places for fast UI coordination, not blocking network calls or heavy computation."
+      ]
+    },
+    {
+      "title": "Storyboards, XIBs, and code are construction choices",
+      "body": [
+        "A storyboard describes screens and transitions in Interface Builder. A XIB usually describes a reusable view or controller's view without an entire navigation graph. Programmatic UIKit constructs and configures objects in Swift. All three use the same UIKit objects and lifecycle; Storyboards are not SwiftUI. Learn to inspect outlets, actions, custom classes, module settings, and reuse identifiers because existing company codebases often use them.",
+        "Do not accidentally create two launch paths. If a scene configuration names a storyboard, the system can create its initial window and controller; if your SceneDelegate then creates another root hierarchy, setup becomes confusing. For a fully programmatic app, remove the main storyboard name from both app-level settings and scene configuration, while keeping the launch screen configuration. Never delete a launch screen simply because you no longer use a main storyboard."
+      ]
+    }
+  ],
+  "example": {
+    "title": "A programmatic root screen with lifecycle logging",
+    "filename": "Day03Lifecycle.swift",
+    "code": "import UIKit\n\n@MainActor\nfinal class LifecycleViewController: UIViewController {\n    private let messageLabel = UILabel()\n\n    override func viewDidLoad() {\n        super.viewDidLoad()\n        print(\"viewDidLoad\")\n        title = \"PocketTasks\"\n        view.backgroundColor = .systemBackground\n\n        messageLabel.text = \"Your first UIKit screen\"\n        messageLabel.textAlignment = .center\n        messageLabel.numberOfLines = 0\n        messageLabel.font = .preferredFont(forTextStyle: .title2)\n        messageLabel.adjustsFontForContentSizeCategory = true\n        messageLabel.frame = view.bounds\n        messageLabel.autoresizingMask = [.flexibleWidth, .flexibleHeight]\n        view.addSubview(messageLabel)\n    }\n\n    override func viewWillAppear(_ animated: Bool) {\n        super.viewWillAppear(animated)\n        print(\"viewWillAppear\")\n    }\n\n    override func viewDidAppear(_ animated: Bool) {\n        super.viewDidAppear(animated)\n        print(\"viewDidAppear\")\n    }\n\n    override func viewDidLayoutSubviews() {\n        super.viewDidLayoutSubviews()\n        print(\"viewDidLayoutSubviews\")\n    }\n}\n\n// Replace the generated SceneDelegate; do not keep two classes with this name.\n@MainActor\nfinal class SceneDelegate: UIResponder, UIWindowSceneDelegate {\n    var window: UIWindow?\n\n    func scene(_ scene: UIScene,\n               willConnectTo session: UISceneSession,\n               options connectionOptions: UIScene.ConnectionOptions) {\n        guard let windowScene = scene as? UIWindowScene else { return }\n\n        let window = UIWindow(windowScene: windowScene)\n        window.rootViewController = UINavigationController(\n            rootViewController: LifecycleViewController()\n        )\n        self.window = window\n        window.makeKeyAndVisible()\n    }\n}",
+    "walkthrough": [
+      "Use a UIKit iOS app target with the scene lifecycle and its existing AppDelegate. Replace the generated SceneDelegate with the one above, then add LifecycleViewController to the same target.",
+      "In the target's Info settings, preserve Application Scene Manifest and the scene delegate class entry. Remove a Storyboard Name from the application scene configuration if present, and remove the app's main storyboard setting if present. Keep the launch screen settings.",
+      "The scene delegate creates a window for the connected UIWindowScene, gives it a navigation controller, retains it, and makes it visible.",
+      "viewDidLoad creates the label once for that loaded view. The autoresizing mask stretches it with the container; no fixed device width is encoded.",
+      "Run on an iOS simulator, rotate it, and inspect Xcode's console. Layout logging may repeat; appearance logging is not a promise of one immutable sequence under all transitions."
+    ],
+    "expectedOutput": "A navigation bar titled PocketTasks and a centered label. The console shows viewDidLoad, appearance callbacks, and one or more layout callbacks. Exact layout-callback counts are intentionally not fixed."
+  },
+  "exercises": [
+    {
+      "id": "d03-warmup",
+      "title": "Separate setup from repeated refresh",
+      "difficulty": "Warm-up",
+      "prompt": "Build a controller that creates its label once but updates an appearance count every time the screen is about to appear.",
+      "requirements": [
+        "Create and add the label in viewDidLoad.",
+        "Increment the count in viewWillAppear.",
+        "Call super and avoid adding duplicate labels."
+      ],
+      "starterCode": "import UIKit\n@MainActor\nfinal class VisitViewController: UIViewController {\n    private let label = UILabel()\n    private var visits = 0\n    // Lifecycle overrides\n}",
+      "hints": [
+        "A controller instance can appear more than once.",
+        "An autoresizing label is sufficient for this lifecycle exercise."
+      ],
+      "solution": "import UIKit\n\n@MainActor\nfinal class VisitViewController: UIViewController {\n    private let label = UILabel()\n    private var visits = 0\n\n    override func viewDidLoad() {\n        super.viewDidLoad()\n        view.backgroundColor = .systemBackground\n        label.frame = view.bounds\n        label.autoresizingMask = [.flexibleWidth, .flexibleHeight]\n        label.textAlignment = .center\n        view.addSubview(label)\n    }\n\n    override func viewWillAppear(_ animated: Bool) {\n        super.viewWillAppear(animated)\n        visits += 1\n        label.text = \"Appearance \\(visits)\"\n    }\n}",
+      "explanation": "This counts appearances of this controller instance, not app launches. Returning from a pushed detail screen increments it without constructing another label. Use it as a root controller and navigate away and back once you implement navigation on Day 6.",
+      "checks": [
+        "Only one label exists after repeated appearances.",
+        "The count increases when the same instance reappears.",
+        "Rotating alone does not intentionally increment the appearance counter."
+      ]
+    },
+    {
+      "id": "d03-core",
+      "title": "Own a custom root view",
+      "difficulty": "Core",
+      "prompt": "Use loadView to give a controller a custom root view. Keep view construction in the view type and controller-level configuration in viewDidLoad.",
+      "requirements": [
+        "Assign the root view in loadView.",
+        "Do not access self.view before assigning it inside loadView.",
+        "Avoid force casting the root view."
+      ],
+      "starterCode": "import UIKit\n@MainActor final class WelcomeView: UIView { /* Build label */ }\n@MainActor final class WelcomeViewController: UIViewController {\n    // Store a WelcomeView and use it as the root\n}",
+      "hints": [
+        "A stored contentView gives a typed reference.",
+        "Implement required init?(coder:) when creating a UIView subclass with a custom initializer."
+      ],
+      "solution": "import UIKit\n\n@MainActor\nfinal class WelcomeView: UIView {\n    private let label = UILabel()\n\n    override init(frame: CGRect) {\n        super.init(frame: frame)\n        backgroundColor = .systemBackground\n        label.text = \"Welcome to PocketTasks\"\n        label.textAlignment = .center\n        label.frame = bounds\n        label.autoresizingMask = [.flexibleWidth, .flexibleHeight]\n        addSubview(label)\n    }\n\n    required init?(coder: NSCoder) {\n        fatalError(\"This example supports programmatic construction only\")\n    }\n}\n\n@MainActor\nfinal class WelcomeViewController: UIViewController {\n    private let contentView = WelcomeView(frame: .zero)\n\n    override func loadView() {\n        view = contentView\n    }\n\n    override func viewDidLoad() {\n        super.viewDidLoad()\n        title = \"Welcome\"\n    }\n}",
+      "explanation": "The controller has a typed reference without an unsafe cast, and the view can be reused or previewed independently. The coder initializer intentionally rejects storyboard/XIB construction; do not connect this particular class in Interface Builder.",
+      "checks": [
+        "The root view is the stored WelcomeView.",
+        "The example runs when used as a programmatic root controller.",
+        "No recursive self.view access occurs during loadView."
+      ]
+    },
+    {
+      "id": "d03-stretch",
+      "title": "Diagnose a duplicate interface",
+      "difficulty": "Stretch",
+      "prompt": "A controller adds a new banner every time viewDidLayoutSubviews runs. Refactor it so layout changes do not create more banners.",
+      "requirements": [
+        "Create and attach the banner once.",
+        "Update only geometry during layout.",
+        "Keep layout work idempotent: repeating it must not change the number of subviews."
+      ],
+      "starterCode": "override func viewDidLayoutSubviews() {\n    super.viewDidLayoutSubviews()\n    let banner = UILabel()\n    banner.text = \"Tasks\"\n    view.addSubview(banner)\n    banner.frame = CGRect(x: 20, y: 100, width: 240, height: 44)\n}",
+      "hints": [
+        "Move the banner to a stored property.",
+        "Use the safe-area layout frame when calculating geometry."
+      ],
+      "solution": "import UIKit\n\n@MainActor\nfinal class BannerViewController: UIViewController {\n    private let banner = UILabel()\n\n    override func viewDidLoad() {\n        super.viewDidLoad()\n        view.backgroundColor = .systemBackground\n        banner.text = \"Tasks\"\n        view.addSubview(banner)\n    }\n\n    override func viewDidLayoutSubviews() {\n        super.viewDidLayoutSubviews()\n        let safe = view.safeAreaLayoutGuide.layoutFrame\n        banner.frame = CGRect(\n            x: safe.minX + 20, y: safe.minY + 16,\n            width: max(0, safe.width - 40), height: 44\n        )\n    }\n}",
+      "explanation": "The exercise uses manual layout to isolate the lifecycle issue. Tomorrow's constraints express the same relationships more declaratively. Calling this layout method repeatedly changes the frame but does not allocate another label.",
+      "checks": [
+        "Rotating does not increase the view's banner count.",
+        "The banner uses the current safe area.",
+        "There are no network requests or event registrations inside layout."
+      ]
+    }
+  ],
+  "quiz": [
+    {
+      "question": "In a scene-based UIKit app, what connects a window to a particular UI scene?",
+      "options": [
+        "A global UserDefaults instance.",
+        "UIWindowScene.",
+        "A SwiftUI View.",
+        "An outlet collection."
+      ],
+      "answer": 1,
+      "explanation": "Constructing UIWindow(windowScene:) associates the window with its UIWindowScene."
+    },
+    {
+      "question": "Where should a controller usually install its one-time constraints?",
+      "options": [
+        "Every viewDidLayoutSubviews call.",
+        "Every viewWillAppear call.",
+        "viewDidLoad, once for the loaded view.",
+        "Only in AppDelegate."
+      ],
+      "answer": 2,
+      "explanation": "One-time view setup belongs in viewDidLoad. Repeated installation can duplicate constraints."
+    },
+    {
+      "question": "What does viewDidDisappear guarantee?",
+      "options": [
+        "The controller was destroyed.",
+        "The app was terminated.",
+        "The view left its visible appearance state, but the controller may remain alive.",
+        "All network requests were cancelled."
+      ],
+      "answer": 2,
+      "explanation": "Visibility and object lifetime are distinct. A controller in a navigation stack can disappear and later return."
+    },
+    {
+      "question": "When overriding loadView to construct a custom root, what is essential?",
+      "options": [
+        "Assign self.view to the constructed root view.",
+        "Read self.view recursively before construction.",
+        "Call a network service synchronously.",
+        "Install another app entry point."
+      ],
+      "answer": 0,
+      "explanation": "loadView is responsible for supplying the root view; accessing the getter before assigning it can recurse."
+    },
+    {
+      "question": "Does removing the main storyboard mean the launch screen should be removed?",
+      "options": [
+        "Yes, both are the same interface.",
+        "No; launch-screen configuration has a separate purpose.",
+        "Only when using navigation controllers.",
+        "Only in Swift 6."
+      ],
+      "answer": 1,
+      "explanation": "The launch screen and the app's initial interactive UI are separate concerns."
+    }
+  ],
+  "pitfalls": [
+    "Leaving a storyboard launch path active while also building a second root window can duplicate setup.",
+    "Placing repeated observers or subview creation in appearance/layout callbacks can accumulate work.",
+    "Assuming viewDidDisappear means deinit leads to incorrect cleanup decisions.",
+    "Accessing view during a custom loadView before assigning it can recurse.",
+    "The simulator's lifecycle logs are observations, not a universal exact ordering contract."
+  ],
+  "checkpoint": [
+    "Draw UIApplication → scene → window → root controller → views.",
+    "Explain when a controller can exist without a loaded view.",
+    "Place setup, visibility refresh, and geometry work in appropriate callbacks.",
+    "Describe how an outlet connection differs from programmatic construction.",
+    "Run the example and explain why layout logs repeat."
+  ],
+  "references": [
+    {
+      "title": "Apple — Managing your app's life cycle",
+      "url": "https://developer.apple.com/documentation/uikit/managing-your-app-s-life-cycle"
+    },
+    {
+      "title": "Apple — UIViewController",
+      "url": "https://developer.apple.com/documentation/uikit/uiviewcontroller"
+    },
+    {
+      "title": "Apple — UIWindowSceneDelegate",
+      "url": "https://developer.apple.com/documentation/uikit/uiwindowscenedelegate"
+    },
+    {
+      "title": "Apple — UIResponder",
+      "url": "https://developer.apple.com/documentation/uikit/uiresponder"
+    }
+  ],
+  "capstone": {
+    "title": "Launch PocketTasks through UIKit",
+    "steps": [
+      "Create a UIKit app target and choose one intentional UI construction approach.",
+      "Use a navigation controller with a placeholder TaskListViewController as the scene root.",
+      "Keep lifecycle logging temporarily to observe navigation and rotation.",
+      "Document the app's minimum iOS version and which setup belongs in AppDelegate versus SceneDelegate."
+    ]
+  }
+}

@@ -1,0 +1,354 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+		A00000000000000000000064 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = TaskItem.swift;
+			sourceTree = "<group>";
+		};
+		A000000000000000000000C8 = {
+			isa = PBXBuildFile;
+			fileRef = A00000000000000000000064;
+		};
+		A00000000000000000000065 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = TaskFileStore.swift;
+			sourceTree = "<group>";
+		};
+		A000000000000000000000C9 = {
+			isa = PBXBuildFile;
+			fileRef = A00000000000000000000065;
+		};
+		A00000000000000000000066 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = TaskRepository.swift;
+			sourceTree = "<group>";
+		};
+		A000000000000000000000CA = {
+			isa = PBXBuildFile;
+			fileRef = A00000000000000000000066;
+		};
+		A00000000000000000000067 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = AppDelegate.swift;
+			sourceTree = "<group>";
+		};
+		A000000000000000000000CB = {
+			isa = PBXBuildFile;
+			fileRef = A00000000000000000000067;
+		};
+		A00000000000000000000068 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = SceneDelegate.swift;
+			sourceTree = "<group>";
+		};
+		A000000000000000000000CC = {
+			isa = PBXBuildFile;
+			fileRef = A00000000000000000000068;
+		};
+		A00000000000000000000069 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = TaskListViewController.swift;
+			sourceTree = "<group>";
+		};
+		A000000000000000000000CD = {
+			isa = PBXBuildFile;
+			fileRef = A00000000000000000000069;
+		};
+		A0000000000000000000006A = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = TaskEditorViewController.swift;
+			sourceTree = "<group>";
+		};
+		A000000000000000000000CE = {
+			isa = PBXBuildFile;
+			fileRef = A0000000000000000000006A;
+		};
+		A0000000000000000000006B = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = TaskDetailViewController.swift;
+			sourceTree = "<group>";
+		};
+		A000000000000000000000CF = {
+			isa = PBXBuildFile;
+			fileRef = A0000000000000000000006B;
+		};
+		A0000000000000000000006E = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.plist.xml;
+			path = Info.plist;
+			sourceTree = "<group>";
+		};
+		A0000000000000000000006F = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = PocketTasksTests.swift;
+			sourceTree = "<group>";
+		};
+		A000000000000000000000D3 = {
+			isa = PBXBuildFile;
+			fileRef = A0000000000000000000006F;
+		};
+		A0000000000000000000000C = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.application;
+			path = PocketTasks.app;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		A0000000000000000000000D = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.cfbundle;
+			path = PocketTasksTests.xctest;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		A00000000000000000000002 = {
+			isa = PBXGroup;
+			children = (A00000000000000000000003, A00000000000000000000004, A00000000000000000000005,);
+			sourceTree = "<group>";
+		};
+		A00000000000000000000003 = {
+			isa = PBXGroup;
+			children = (A00000000000000000000064, A00000000000000000000065, A00000000000000000000066, A00000000000000000000067, A00000000000000000000068, A00000000000000000000069, A0000000000000000000006A, A0000000000000000000006B, A0000000000000000000006E,);
+			path = PocketTasks;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000004 = {
+			isa = PBXGroup;
+			children = (A0000000000000000000006F,);
+			path = PocketTasksTests;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000005 = {
+			isa = PBXGroup;
+			children = (A0000000000000000000000C, A0000000000000000000000D,);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000014 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A000000000000000000000C8, A000000000000000000000C9, A000000000000000000000CA, A000000000000000000000CB, A000000000000000000000CC, A000000000000000000000CD, A000000000000000000000CE, A000000000000000000000CF,);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00000000000000000000015 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A000000000000000000000D3,);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00000000000000000000016 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00000000000000000000017 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00000000000000000000018 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00000000000000000000019 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00000000000000000000028 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000001;
+			proxyType = 1;
+			remoteGlobalIDString = A0000000000000000000000A;
+			remoteInfo = PocketTasks;
+		};
+		A00000000000000000000029 = {
+			isa = PBXTargetDependency;
+			target = A0000000000000000000000A;
+			targetProxy = A00000000000000000000028;
+		};
+		A0000000000000000000000A = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A0000000000000000000001F;
+			buildPhases = (A00000000000000000000014, A00000000000000000000016, A00000000000000000000018,);
+			buildRules = ();
+			dependencies = ();
+			name = PocketTasks;
+			productName = PocketTasks;
+			productReference = A0000000000000000000000C;
+			productType = "com.apple.product-type.application";
+		};
+		A0000000000000000000000B = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000000020;
+			buildPhases = (A00000000000000000000015, A00000000000000000000017, A00000000000000000000019,);
+			buildRules = ();
+			dependencies = (A00000000000000000000029,);
+			name = PocketTasksTests;
+			productName = PocketTasksTests;
+			productReference = A0000000000000000000000D;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		A00000000000000000000001 = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					A0000000000000000000000A = { CreatedOnToolsVersion = 16.0; };
+					A0000000000000000000000B = { CreatedOnToolsVersion = 16.0; TestTargetID = A0000000000000000000000A; };
+				};
+			};
+			buildConfigurationList = A0000000000000000000001E;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base,);
+			mainGroup = A00000000000000000000002;
+			productRefGroup = A00000000000000000000005;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (A0000000000000000000000A, A0000000000000000000000B,);
+		};
+		A0000000000000000000012C = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A0000000000000000000012D = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		A00000000000000000000136 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PocketTasks/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hafizr283.PocketTasksLearning;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A00000000000000000000137 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PocketTasks/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hafizr283.PocketTasksLearning;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A00000000000000000000140 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.hafizr283.PocketTasksLearningTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PocketTasks.app/PocketTasks";
+			};
+			name = Debug;
+		};
+		A00000000000000000000141 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.hafizr283.PocketTasksLearningTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PocketTasks.app/PocketTasks";
+			};
+			name = Release;
+		};
+		A0000000000000000000001E = {
+			isa = XCConfigurationList;
+			buildConfigurations = (A0000000000000000000012C, A0000000000000000000012D,);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A0000000000000000000001F = {
+			isa = XCConfigurationList;
+			buildConfigurations = (A00000000000000000000136, A00000000000000000000137,);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A00000000000000000000020 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (A00000000000000000000140, A00000000000000000000141,);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+	};
+	rootObject = A00000000000000000000001;
+}
