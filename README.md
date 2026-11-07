@@ -84,7 +84,7 @@ npm run build    # Regenerate Markdown/source extracts and static dist/
 
 ## Progress and privacy
 
-Notes, practice drafts, quiz attempts, and completed days stay in local storage in the current browser and origin. No account, analytics, backend, or external code-execution service is used. Export progress in **Setup** or a day's **Notes** tab before changing devices, clearing browser data, or moving between HTTP and HTTPS. Import downloads a backup of the current state, then merges completed work and uses imported notes/drafts when present. Keep private company source out of any public repository.
+Notes, practice drafts, quiz attempts, and completed days stay in local storage in the current browser and origin. No account, analytics, backend, or external code-execution service is used. Export progress in **Setup** or a day's **Notes** tab before changing devices, clearing browser data, or moving between HTTP and HTTPS. Import downloads a backup of the current state, then merges completed work and uses imported notes/drafts when present.
 
 ## Hosting and validation
 

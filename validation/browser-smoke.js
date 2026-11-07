@@ -1,4 +1,4 @@
-// Run only in an isolated QA browser through agent-browser eval --stdin.
+// Run only in an isolated QA browser through agent-browser eval -b <base64>.
 // Exercises public DOM interactions. Leaves QA progress for the reload check.
 (async () => {
   const checks=[];
@@ -54,7 +54,7 @@
   input('#topic-search','');
   await go('/lab');
   const initial=document.querySelector('#lab-editor').value;
-  input('#lab-editor',initial.replace('Build something good.','My real learning lab').replace('stack.spacing = 20','stack.spacing = 32'));
+  input('#lab-editor',initial.replace(/titleLabel\.text\s*=\s*"[^"\n]*"/,'titleLabel.text = "My real learning lab"').replace(/stack\.spacing\s*=\s*\d+/,'stack.spacing = 32'));
   document.querySelector('[data-preview]').click();
   assert(document.querySelector('#phone-content h2').textContent==='My real learning lab','UI preview reads the edited Swift title');
   assert(document.querySelector('#phone-content').style.gap==='32px','UI preview reads stack spacing');

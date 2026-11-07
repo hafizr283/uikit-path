@@ -280,6 +280,14 @@ def main():
     ios_sdk = run_tool(["xcrun", "--sdk", "iphonesimulator", "--show-sdk-path"])
     ios_platform = Path(run_tool(["xcrun", "--sdk", "iphonesimulator", "--show-sdk-platform-path"]))
     mac_sdk = run_tool(["xcrun", "--sdk", "macosx", "--show-sdk-path"])
+    # Match SwiftPM's Darwin SDK platform paths. The XCTest framework exposes
+    # Objective-C classes, while its Swift assertion overlay is a separate
+    # module in Developer/usr/lib. -F alone finds XCTestCase but not XCTAssert*.
+    # Source: swift-package-manager, swift-6.1.2-RELEASE,
+    # Sources/PackageModel/SwiftSDKs/SwiftSDK.swift, sdkPlatformPaths().
+    ios_test_frameworks = ios_platform / "Developer" / "Library" / "Frameworks"
+    ios_test_private_frameworks = ios_platform / "Developer" / "Library" / "PrivateFrameworks"
+    ios_test_libraries = ios_platform / "Developer" / "usr" / "lib"
     architecture = "arm64" if platform.machine() == "arm64" else "x86_64"
     environment.update({
         "xcode": run_tool(["xcodebuild", "-version"]),
@@ -287,13 +295,18 @@ def main():
         "ios_sdk": ios_sdk, "macos_sdk": mac_sdk,
         "ios_target": architecture + "-apple-ios17.0-simulator",
         "host_target": architecture + "-apple-macosx13.0",
+        "ios_test_frameworks": str(ios_test_frameworks),
+        "ios_test_private_frameworks": str(ios_test_private_frameworks),
+        "ios_test_swift_import_path": str(ios_test_libraries),
+        "ios_xctest_swift_overlay_present": (ios_test_libraries / "XCTest.swiftmodule").exists(),
     })
     cache = destination / "module-cache"
     cache.mkdir(exist_ok=True)
     common = [swiftc, "-swift-version", "6", "-strict-concurrency=complete",
               "-parse-as-library", "-module-cache-path", cache]
     ios = common + ["-sdk", ios_sdk, "-target", environment["ios_target"],
-                    "-F", ios_platform / "Developer" / "Library" / "Frameworks"]
+                    "-F", ios_test_frameworks, "-F", ios_test_private_frameworks,
+                    "-I", ios_test_libraries]
     host = common + ["-sdk", mac_sdk, "-target", environment["host_target"]]
     results = []
     for case in cases:

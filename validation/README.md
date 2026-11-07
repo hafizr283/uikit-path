@@ -30,7 +30,7 @@ but provides no Swift compilation or runtime evidence.
   `-swift-version 6`, complete strict-concurrency checking, and an iOS 17 simulator target.
   The installed Xcode iOS Simulator SDK supplies UIKit, Foundation, Security, and Core Data.
 - Day 12 includes Day 11's unchanged API source because its walkthrough explicitly depends on it.
-- Day 16 uses the simulator XCTest framework search path. Its worked example and all three
+- Day 16 uses the simulator XCTest framework and Swift-overlay search paths. Its worked example and all three
   solutions are also typechecked together, with the private teaching types and their extension
   kept in the same source file as the exercise requires.
 - Day 20 is Bash, not Swift. Only `bash -n` runs for this example. The example's native project
@@ -44,6 +44,13 @@ but provides no Swift compilation or runtime evidence.
 
 No live network request is required. The network-boundary XCTest uses its own URLProtocol.
 Runtime file and preferences cases use unique temporary paths and suites, with cleanup.
+
+The manual iOS compiler invocation follows the Darwin test-support directory layout used by
+[Swift Package Manager 6.1.2](https://github.com/swiftlang/swift-package-manager/blob/swift-6.1.2-RELEASE/Sources/PackageModel/SwiftSDKs/SwiftSDK.swift#L642).
+Both platform framework search paths use `-F`; `Developer/usr/lib` uses `-I` for the Swift
+XCTest overlay. Using only the framework path finds Objective-C `XCTestCase` but can leave
+Swift functions such as `XCTAssertEqual` and `XCTUnwrap` unavailable. No assertion stubs or
+diagnostic suppressions are used. The report records the actual paths selected by Xcode.
 
 ## Context and limits
 
