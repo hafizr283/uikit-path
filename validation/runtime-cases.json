@@ -1,0 +1,189 @@
+[
+  {
+    "id": "day01-model-contract",
+    "sources": [
+      {
+        "day": 1,
+        "part": "example"
+      }
+    ],
+    "harness": "runtime/day01-model-contract.swift",
+    "scope": "Worked example: title invariants, value semantics, stable identity, and protocol-based filtering."
+  },
+  {
+    "id": "day02-weak-ownership",
+    "sources": [
+      {
+        "day": 2,
+        "part": "example"
+      }
+    ],
+    "harness": "runtime/day02-weak-ownership.swift",
+    "scope": "Worked example: the callback store must not retain TaskEditor."
+  },
+  {
+    "id": "day10-actor-counter",
+    "sources": [
+      {
+        "day": 10,
+        "exercise": "d10-warmup",
+        "part": "solution",
+        "imports": [
+          "Foundation"
+        ]
+      }
+    ],
+    "harness": "runtime/day10-actor-counter.swift",
+    "scope": "Exercise: 100 structured child tasks must produce an exact actor-isolated count."
+  },
+  {
+    "id": "day10-structured-summary",
+    "sources": [
+      {
+        "day": 10,
+        "exercise": "d10-core",
+        "part": "solution",
+        "imports": [
+          "Foundation"
+        ]
+      }
+    ],
+    "harness": "runtime/day10-structured-summary.swift",
+    "scope": "Exercise: async-let results and cooperative cancellation."
+  },
+  {
+    "id": "day11-json-contract",
+    "sources": [
+      {
+        "day": 11,
+        "exercise": "d11-warmup",
+        "part": "solution",
+        "imports": [
+          "Foundation"
+        ]
+      }
+    ],
+    "harness": "runtime/day11-json-contract.swift",
+    "scope": "Exercise: required fields, absent optional date, and ISO 8601 date decoding."
+  },
+  {
+    "id": "day12-page-merge",
+    "sources": [
+      {
+        "day": 11,
+        "part": "example"
+      },
+      {
+        "day": 12,
+        "exercise": "d12-core",
+        "part": "solution"
+      }
+    ],
+    "harness": "runtime/day12-page-merge.swift",
+    "scope": "Exercise: stable ordering and latest-payload deduplication. No network request is made."
+  },
+  {
+    "id": "day13-repository-failure",
+    "sources": [
+      {
+        "day": 13,
+        "part": "example"
+      },
+      {
+        "day": 13,
+        "exercise": "d13-core",
+        "part": "solution",
+        "imports": [
+          "Foundation"
+        ]
+      }
+    ],
+    "harness": "runtime/day13-repository-failure.swift",
+    "scope": "Exercise and worked example: deterministic error state and repository mutation."
+  },
+  {
+    "id": "day14-preference-defaults",
+    "sources": [
+      {
+        "day": 14,
+        "exercise": "d14-warmup",
+        "part": "solution",
+        "imports": [
+          "Foundation"
+        ]
+      }
+    ],
+    "harness": "runtime/day14-preference-defaults.swift",
+    "scope": "Exercise: defaults, persistence within a unique test suite, and obsolete enum fallback."
+  },
+  {
+    "id": "day14-file-roundtrip",
+    "sources": [
+      {
+        "day": 14,
+        "exercise": "d14-core",
+        "part": "starterCode",
+        "imports": [
+          "Foundation"
+        ]
+      },
+      {
+        "day": 14,
+        "exercise": "d14-core",
+        "part": "solution",
+        "imports": [
+          "Foundation"
+        ]
+      }
+    ],
+    "harness": "runtime/day14-file-roundtrip.swift",
+    "scope": "Exercise: missing-file semantics, JSON round trip, and corrupt-file error propagation."
+  },
+  {
+    "id": "day15-expiry-boundary",
+    "sources": [
+      {
+        "day": 15,
+        "exercise": "15-warmup",
+        "part": "solution"
+      }
+    ],
+    "harness": "runtime/day15-expiry-boundary.swift",
+    "scope": "Exercise: deterministic refresh threshold and expired-credential behavior."
+  },
+  {
+    "id": "day15-request-origin",
+    "sources": [
+      {
+        "day": 15,
+        "exercise": "15-core",
+        "part": "solution"
+      }
+    ],
+    "harness": "runtime/day15-request-origin.swift",
+    "scope": "Exercise: trusted-origin allowlist and authorization header construction. No request is sent."
+  },
+  {
+    "id": "day19-route-validation",
+    "sources": [
+      {
+        "day": 19,
+        "part": "example"
+      }
+    ],
+    "harness": "runtime/day19-route-validation.swift",
+    "scope": "Worked example: accepted routes and rejection of malformed or untrusted URL forms."
+  },
+  {
+    "id": "day19-bounded-import",
+    "sources": [
+      {
+        "day": 19,
+        "exercise": "19-core",
+        "part": "solution"
+      }
+    ],
+    "harness": "runtime/day19-bounded-import.swift",
+    "scope": "Exercise: valid UTF-8, exact size boundary, oversize rejection, and invalid encoding."
+  }
+]

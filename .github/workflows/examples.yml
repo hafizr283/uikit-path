@@ -1,0 +1,55 @@
+name: Validate course Swift examples
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/**'
+      - 'validation/**'
+      - 'scripts/check-swift-examples.py'
+      - '.github/workflows/examples.yml'
+  pull_request:
+    paths:
+      - 'content/**'
+      - 'validation/**'
+      - 'scripts/check-swift-examples.py'
+      - '.github/workflows/examples.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swift-examples-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  examples:
+    name: Swift 6 / iOS Simulator SDK + macOS tests
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Typecheck and execute bounded course checks
+        run: python3 scripts/check-swift-examples.py --output-dir "$RUNNER_TEMP/uikit-swift-validation"
+      - name: Publish verification summary
+        if: always()
+        run: |
+          REPORT="$RUNNER_TEMP/uikit-swift-validation/report.md"
+          if [ -f "$REPORT" ]; then
+            cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '%s\n' 'Validation did not produce a report. Inspect setup diagnostics; no successful verification is implied.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Retain exact diagnostics and source provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: course-swift-validation
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/uikit-swift-validation/report.json
+            ${{ runner.temp }}/uikit-swift-validation/report.md
+            ${{ runner.temp }}/uikit-swift-validation/logs/
+            ${{ runner.temp }}/uikit-swift-validation/extracted/

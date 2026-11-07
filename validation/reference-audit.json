@@ -1,0 +1,32 @@
+{
+  "checkedDate": "2026-11-07",
+  "timeZone": "Asia/Dhaka",
+  "scope": "Official reference links in all 20 daily lessons.",
+  "method": {
+    "requests": "HTTP GET with redirects followed",
+    "maximumConcurrentRequests": 4,
+    "timeoutMilliseconds": 20000,
+    "appleDocC": "Documentation routes also checked against their structured DocC JSON payload."
+  },
+  "counts": {
+    "lessons": 20,
+    "referenceOccurrences": 74,
+    "uniqueURLs": 67,
+    "initialSuccessfulURLs": 66,
+    "initialBrokenURLs": 1,
+    "verifiedReplacements": 1,
+    "finalSuccessfulURLs": 67,
+    "appleDocCPayloadsVerified": 58
+  },
+  "fixes": [
+    {
+      "day": 6,
+      "original": "https://developer.apple.com/documentation/uikit/implementing-a-container-view-controller",
+      "originalHTTPStatus": 404,
+      "replacement": "https://developer.apple.com/library/archive/featuredarticles/ViewControllerPGforiPhoneOS/ImplementingaContainerViewController.html",
+      "replacementHTTPStatus": 200,
+      "replacementTitle": "View Controller Programming Guide for iOS: Implementing a Container View Controller"
+    }
+  ],
+  "result": "All 74 reference occurrences resolve to verified official pages after the single correction. No full fetched page bodies are stored in this report."
+}

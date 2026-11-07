@@ -5,6 +5,7 @@
 // TaskRecord represents domain data. TaskRow represents one screen's display values. They need not remain separate in every tiny app, but the distinction becomes useful when formatting and server contracts evolve.
 // The view model exposes an async reload method. In a controller, store the Task handle that calls it and cancel according to the screen's lifecycle; do not create an untracked load on every appearance.
 // The composition root decides the concrete repository. Replacing MemoryTaskRepository with a tested remote/local implementation does not require rewriting the renderer.
+// Cancellation can surface as CancellationError or as a transport error from URLSession. The generic catch checks the owning task's cancellation flag and the current generation before publishing a genuine failure.
 
 import Foundation
 
@@ -80,7 +81,8 @@ final class TasksViewModel {
         } catch is CancellationError {
             // The owner cancelled this presentation request.
         } catch {
-            guard current == generation else { return }
+            // URLSession may report cancellation as URLError.cancelled.
+            guard !Task.isCancelled, current == generation else { return }
             state = .failed("Unable to load tasks. Please retry.")
         }
     }

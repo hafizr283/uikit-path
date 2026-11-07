@@ -104,6 +104,11 @@ private final class TaskListViewModel {
         } catch is CancellationError {
             state = .idle
         } catch {
+            // Cancellation may arrive as a transport error instead.
+            guard !Task.isCancelled else {
+                state = .idle
+                return
+            }
             state = .failed("Could not load tasks.")
         }
     }
@@ -150,6 +155,7 @@ final class TaskListViewModelTests: XCTestCase {
 3. StubLoader is immutable and Sendable. Its result makes success, empty, and failure cases immediate and independent of a server.
 4. Only test methods that touch the MainActor view model are annotated. Each assertion compares a local snapshot of observable state.
 5. This small model assumes one load at a time. A real searchable list also needs stale-request protection and tests for out-of-order responses from Day 12.
+6. The model also checks Task.isCancelled in its generic catch: a cancelled URLSession operation may throw URLError.cancelled instead of CancellationError. A cancelled owning task returns to idle; ordinary failures still produce the recoverable message.
 
 **Expected behavior:** Three tests pass in an iOS test destination. A change that stops mapping an empty result to .empty should fail the empty-state test.
 
